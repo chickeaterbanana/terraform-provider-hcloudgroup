@@ -1,0 +1,14 @@
+terraform-provider-hcloudgroup
+bin/
+dist/
+
+*.test
+*.out
+coverage.out
+
+# tofu/terraform local state from the example
+examples/**/.terraform
+examples/**/.terraform.lock.hcl
+examples/**/terraform.tfstate*
+examples/**/*.tfvars
+examples/**/.terraform.tfstate.lock.info
