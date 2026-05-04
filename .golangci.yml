@@ -11,9 +11,25 @@ linters:
     - govet
     - staticcheck
     - unused
+    # Security: catches command injection, weak crypto, unsafe path ops.
+    # The provider runs operator-supplied shell commands; gosec is the
+    # most important addition for a published provider.
+    - gosec
+    # Net: catches leaked HTTP response bodies. We don't open raw HTTP
+    # clients today, but the linter is cheap and protects against
+    # future regressions in any package that calls the hcloud SDK
+    # directly.
+    - bodyclose
+    # Context: catches functions that lose the cancellation context.
+    # The reconciler's cancel propagation matters across every retry
+    # loop and goroutine.
+    - contextcheck
   exclusions:
     rules:
-      - path: _test\.go
+      # Acceptance fixtures (internal/acctest) legitimately ignore some
+      # cleanup errors during tear-down. Don't exempt unit tests, where
+      # `_ = touch(flag)`-style swallowing is a real bug.
+      - path: internal/acctest/.*_test\.go
         linters:
           - errcheck
 

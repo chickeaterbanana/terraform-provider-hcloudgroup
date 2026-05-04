@@ -1,4 +1,4 @@
-.PHONY: test testrace testacc lint sweep tidy
+.PHONY: test testrace testacc lint sweep tidy docs
 
 # Hermetic unit + reconciler tests. Fast — gates every PR.
 test:
@@ -25,3 +25,9 @@ sweep:
 
 tidy:
 	go mod tidy
+
+# Regenerate the registry-format docs under docs/{index,resources,data-sources}.md
+# Re-run whenever the schema changes. Requires:
+#   go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
+docs:
+	tfplugindocs generate --provider-name hcloudgroup

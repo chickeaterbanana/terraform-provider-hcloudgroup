@@ -74,7 +74,7 @@ The provider is a single Go binary running inside `tofu apply`. No long-running 
 
 - Built on **terraform-plugin-framework**.
 - Resources: `hcloudgroup_server_group`.
-- Data sources: `hcloudgroup_server_group` (read-only lookup).
+- Data sources: none in v1; a read-only `hcloudgroup_server_group` data source is planned for v2.
 - Provider config: `hcloud_token` (write-only / ephemeral). Optional `hcloud_endpoint` for testing.
 - Dependencies:
   - `github.com/hetznercloud/hcloud-go/v2` — official hcloud SDK
@@ -92,6 +92,13 @@ State is split between two tiers, each handling a different failure mode:
 - **Hcloud server labels** record per-slot facts that must survive ungraceful crashes. Each label update is an atomic hcloud API call, persisted server-side immediately. The `Read` function reconstructs reality from these labels.
 
 The two tiers are complementary: graceful errors → tofu state captures inter-slot progress; ungraceful crashes → labels let `Read` rebuild observed state from scratch.
+
+**Drift detection limits.** `Read` rebuilds state from provider labels, not from physical server attributes. The deltas it can detect are:
+
+- A managed server has been deleted out-of-band → `Read` removes the resource from state so the next plan presents as a fresh create.
+- The set of `complete=true` servers per slot has changed → reflected in the `slots` attribute.
+
+The deltas it **cannot** detect are out-of-band edits to `image`, `server_type`, or `location` on a live server. Those are not surfaced as drift because the provider does not compare physical attributes against the desired state during refresh; the rolling-replace contract is hash-based and triggered by HCL changes through `replace_on_change`. Treat the hcloud API as the single source of truth for those attributes — don't edit them outside tofu.
 
 ### 5.1 Per-slot record (tofu state)
 

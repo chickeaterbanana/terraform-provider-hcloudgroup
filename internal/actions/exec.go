@@ -46,6 +46,9 @@ func (c *Command) Run(ctx context.Context, sc slotctx.SlotContext) Result {
 	runCtx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 
+	// #nosec G204 -- the provider's contract is to run operator-supplied
+	// shell commands by design (lifecycle hooks). Dynamic values flow via
+	// env vars, not interpolation; see action.go for the contract.
 	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", c.Command)
 	cmd.Env = env // never nil; nil inherits parent env
 	if c.WorkingDir != "" {
