@@ -36,7 +36,7 @@ jobs:
       # golangci-lint v2 config schema (".golangci.yml: version: \"2\"").
       # Earlier action versions silently fail to parse the config and
       # exit non-zero.
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
