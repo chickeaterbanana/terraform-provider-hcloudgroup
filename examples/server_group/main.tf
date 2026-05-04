@@ -66,9 +66,9 @@ locals {
 
 resource "hcloudgroup_server_group" "consul" {
   name        = "consul-servers"
-  count       = 3
-  image       = "debian-12"
-  server_type = "cx22"
+  replicas    = 3
+  image       = "debian-13"
+  server_type = "cx23"
   location    = "fsn1"
   network_id  = hcloud_network.internal.id
 
