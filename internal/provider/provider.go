@@ -15,11 +15,11 @@ import (
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
-	rsg "github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/resource_server_group"
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/servergroup"
 )
 
-// HCloudgroupProvider is the framework provider type.
-type HCloudgroupProvider struct {
+// HCloudGroupProvider is the framework provider type.
+type HCloudGroupProvider struct {
 	Version string
 }
 
@@ -33,18 +33,18 @@ type providerModel struct {
 // New returns a provider factory bound to a release version string. Used
 // from main.go.
 func New(version string) func() provider.Provider {
-	return func() provider.Provider { return &HCloudgroupProvider{Version: version} }
+	return func() provider.Provider { return &HCloudGroupProvider{Version: version} }
 }
 
 // Metadata sets the provider type name (governs the resource type prefix
 // "hcloudgroup_*").
-func (p *HCloudgroupProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+func (p *HCloudGroupProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "hcloudgroup"
 	resp.Version = p.Version
 }
 
 // Schema declares provider-level configuration.
-func (p *HCloudgroupProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+func (p *HCloudGroupProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages groups of Hetzner Cloud servers as a single rolling-replace unit.",
 		Attributes: map[string]schema.Attribute{
@@ -64,7 +64,7 @@ func (p *HCloudgroupProvider) Schema(_ context.Context, _ provider.SchemaRequest
 // Configure constructs the hcloud client. It pulls the token from HCL
 // first, falling back to the HCLOUD_TOKEN env var. Missing tokens are a
 // configuration error.
-func (p *HCloudgroupProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+func (p *HCloudGroupProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var cfg providerModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
@@ -99,13 +99,13 @@ func (p *HCloudgroupProvider) Configure(ctx context.Context, req provider.Config
 }
 
 // Resources lists every concrete resource type the provider exposes.
-func (p *HCloudgroupProvider) Resources(_ context.Context) []func() resource.Resource {
+func (p *HCloudGroupProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		rsg.New,
+		servergroup.New,
 	}
 }
 
 // DataSources is empty in v1; the read-only data source is a follow-up.
-func (p *HCloudgroupProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+func (p *HCloudGroupProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return nil
 }

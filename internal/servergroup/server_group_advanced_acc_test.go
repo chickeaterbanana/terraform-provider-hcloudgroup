@@ -1,4 +1,4 @@
-package resource_server_group_test
+package servergroup_test
 
 import (
 	"context"
@@ -130,6 +130,8 @@ func TestAccServerGroup_HookOrdering(t *testing.T) {
 				// Initial create: only before_create + post_create fire.
 				Config: hookOrderingHCL(t, groupName, "debian-13", 1, logFile),
 				Check: func(*terraform.State) error {
+					// #nosec G304 -- logFile is a t.TempDir()-derived path,
+					// not operator input.
 					data, err := os.ReadFile(logFile)
 					require.NoError(t, err)
 					lines := nonEmptyLines(string(data))
@@ -141,6 +143,8 @@ func TestAccServerGroup_HookOrdering(t *testing.T) {
 				// Replace: hooks should fire in the spec order.
 				Config: hookOrderingHCL(t, groupName, "ubuntu-24.04", 1, logFile),
 				Check: func(*terraform.State) error {
+					// #nosec G304 -- logFile is a t.TempDir()-derived path,
+					// not operator input.
 					data, err := os.ReadFile(logFile)
 					require.NoError(t, err)
 					lines := nonEmptyLines(string(data))

@@ -1,4 +1,4 @@
-package resource_server_group_test
+package servergroup_test
 
 import (
 	"testing"

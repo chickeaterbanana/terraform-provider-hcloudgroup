@@ -148,4 +148,8 @@ func (r *runner) renderUserData(sc slotctx.SlotContext) (string, error) {
 // missing from observed state when the flow expected one. It signals a
 // programming bug, not a runtime condition - the caller should never see
 // it under correct phase ordering.
+//
+// Kept unexported deliberately: external callers diagnose via
+// SlotError.Phase rather than matching this sentinel directly. If a
+// future test or caller needs errors.Is matching, export it then.
 var errSlotInactive = errors.New("slot has no observed canonical server")

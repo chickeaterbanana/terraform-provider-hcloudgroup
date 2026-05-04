@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -469,5 +468,3 @@ func RandName(t *testing.T, prefix string) string {
 	out = strings.TrimRight(out, "-")
 	return out
 }
-
-var _ = filepath.Join // keep filepath import for any future helpers without churn

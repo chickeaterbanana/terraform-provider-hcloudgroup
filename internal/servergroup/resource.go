@@ -1,8 +1,7 @@
-// Package resource_server_group implements the hcloudgroup_server_group
-// terraform resource. It is a thin adapter between the framework's CRUD
-// callbacks and the reconciler package, which owns the actual lifecycle
-// logic.
-package resource_server_group
+// Package servergroup implements the hcloudgroup_server_group terraform
+// resource. It is a thin adapter between the framework's CRUD callbacks
+// and the reconciler package, which owns the actual lifecycle logic.
+package servergroup
 
 import (
 	"context"
