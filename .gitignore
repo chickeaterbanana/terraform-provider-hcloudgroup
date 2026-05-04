@@ -12,3 +12,7 @@ examples/**/.terraform.lock.hcl
 examples/**/terraform.tfstate*
 examples/**/*.tfvars
 examples/**/.terraform.tfstate.lock.info
+
+# Local-only dev env
+.envrc
+.claude/

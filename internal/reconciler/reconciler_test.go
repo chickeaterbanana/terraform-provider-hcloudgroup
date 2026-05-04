@@ -1,4 +1,4 @@
-package reconciler
+package reconciler_test
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/actions"
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx/hcloudxtest"
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/reconciler"
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/slotctx"
 )
 
@@ -32,17 +35,17 @@ func (r recordingAction) Run(_ context.Context, sc slotctx.SlotContext) actions.
 	return actions.Result{}
 }
 
-func defaultGroup(count int) Group {
-	hi := HashInputs{
+func defaultGroup(count int) reconciler.Group {
+	hi := reconciler.HashInputs{
 		Image: "ubuntu", ServerType: "cx22", Location: "fsn1",
 		NetworkID: testNetwork,
 	}
 	full, prefix := hi.Hash()
-	return Group{
+	return reconciler.Group{
 		Name: testGroup, Count: count,
 		Image: "ubuntu", ServerType: "cx22", Location: "fsn1", NetworkID: testNetwork,
 		HashFull: full, HashPrefix: prefix,
-		Actions: ActionSet{
+		Actions: reconciler.ActionSet{
 			BeforeCreate: actions.Null{}, PostCreate: actions.Null{},
 			BeforeReplace: actions.Null{}, PostReplace: actions.Null{},
 			BeforeRemove: actions.Null{}, PostRemove: actions.Null{},
@@ -51,61 +54,61 @@ func defaultGroup(count int) Group {
 }
 
 func TestApply_InitialCreate_SequentialAndAllComplete(t *testing.T) {
-	c := newFakeClient()
-	r := New(c)
-	state, err := r.Apply(context.Background(), defaultGroup(3), State{}, nil)
+	c := hcloudxtest.NewFake()
+	r := reconciler.New(c)
+	state, err := r.Apply(context.Background(), defaultGroup(3), reconciler.State{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, state.Slots, 3)
 	for i, sl := range state.Slots {
 		require.Equal(t, i, sl.SlotID)
 		require.Equal(t, 1, sl.Generation)
-		require.Equal(t, StatusReady, sl.Status)
+		require.Equal(t, reconciler.StatusReady, sl.Status)
 		require.NotEmpty(t, sl.PrivateIP)
 	}
-	require.Equal(t, []string{"g-0-1", "g-1-1", "g-2-1"}, c.createdNames)
+	require.Equal(t, []string{"g-0-1", "g-1-1", "g-2-1"}, c.CreatedNames)
 
 	// Every server must end with complete=true.
 	servers, _ := c.ListByGroup(context.Background(), testGroup)
 	require.Len(t, servers, 3)
 	for _, s := range servers {
-		require.Equal(t, "true", s.Labels["hcloudgroup.io/complete"])
+		require.Equal(t, "true", s.Labels[hcloudx.LabelComplete])
 	}
 }
 
 func TestApply_NoOpWhenHashUnchanged(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(2)
-	prior := State{}
+	prior := reconciler.State{}
 	for i := 0; i < g.Count; i++ {
-		c.seedServer(testGroup, i, 1, testNetwork)
-		prior.Slots = append(prior.Slots, SlotState{
-			SlotID: i, ServerID: int64(i + 1),
-			ServerName: ServerName(testGroup, i, 1),
-			Generation: 1, ReplaceHash: g.HashFull, Status: StatusReady,
-			PrivateIP: "10.0.0." + intToStr(i+11),
+		srv := c.SeedServer(testGroup, i, 1, testNetwork)
+		prior.Slots = append(prior.Slots, reconciler.SlotState{
+			SlotID: i, ServerID: srv.ID,
+			ServerName: reconciler.ServerName(testGroup, i, 1),
+			Generation: 1, ReplaceHash: g.HashFull, Status: reconciler.StatusReady,
+			PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
 		})
 	}
-	r := New(c)
+	r := reconciler.New(c)
 	_, err := r.Apply(context.Background(), g, prior, nil)
 	require.NoError(t, err)
-	require.Equal(t, 0, c.createCalls, "no servers should be created on no-op")
-	require.Equal(t, 0, c.deleteCalls, "no servers should be deleted on no-op")
+	require.Equal(t, 0, c.CreateCalls, "no servers should be created on no-op")
+	require.Equal(t, 0, c.DeleteCalls, "no servers should be deleted on no-op")
 }
 
 func TestApply_ReplaceFlow_OnHashChange_RunsHooksAndIncrementsGeneration(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(2)
 
 	// Seed two existing slots with the OLD hash recorded in tofu state.
-	prior := State{}
+	prior := reconciler.State{}
 	for i := 0; i < g.Count; i++ {
-		srv := c.seedServer(testGroup, i, 1, testNetwork)
-		prior.Slots = append(prior.Slots, SlotState{
+		srv := c.SeedServer(testGroup, i, 1, testNetwork)
+		prior.Slots = append(prior.Slots, reconciler.SlotState{
 			SlotID: i, ServerID: srv.ID,
 			ServerName: srv.Name, Generation: 1,
-			ReplaceHash: "OLD_HASH", Status: StatusReady,
-			PrivateIP: "10.0.0." + intToStr(int(srv.ID)+10),
+			ReplaceHash: "OLD_HASH", Status: reconciler.StatusReady,
+			PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
 		})
 	}
 
@@ -113,7 +116,7 @@ func TestApply_ReplaceFlow_OnHashChange_RunsHooksAndIncrementsGeneration(t *test
 	g.Actions.BeforeReplace = recordingAction{calls: &beforeReplaceCalls}
 	g.Actions.PostReplace = recordingAction{calls: &postReplaceCalls}
 
-	r := New(c)
+	r := reconciler.New(c)
 	state, err := r.Apply(context.Background(), g, prior, nil)
 	require.NoError(t, err)
 
@@ -124,25 +127,25 @@ func TestApply_ReplaceFlow_OnHashChange_RunsHooksAndIncrementsGeneration(t *test
 	}
 	require.Equal(t, int32(2), beforeReplaceCalls)
 	require.Equal(t, int32(2), postReplaceCalls)
-	require.Equal(t, 2, c.deleteCalls, "two old servers deleted")
-	require.Equal(t, 2, c.createCalls, "two new servers created")
+	require.Equal(t, 2, c.DeleteCalls, "two old servers deleted")
+	require.Equal(t, 2, c.CreateCalls, "two new servers created")
 }
 
 // This is the scale-down regression test. Concern 1 from the advisor:
 // in-state out-of-range slots were being destroyed by pre-flight,
 // silently bypassing before_remove/post_remove and 404'ing in phaseRemove.
 func TestApply_ScaleDown_InvokesRemoveHooks_NotPreflight(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(5)
 
-	prior := State{}
+	prior := reconciler.State{}
 	for i := 0; i < g.Count; i++ {
-		srv := c.seedServer(testGroup, i, 1, testNetwork)
-		prior.Slots = append(prior.Slots, SlotState{
+		srv := c.SeedServer(testGroup, i, 1, testNetwork)
+		prior.Slots = append(prior.Slots, reconciler.SlotState{
 			SlotID: i, ServerID: srv.ID,
 			ServerName: srv.Name, Generation: 1,
-			ReplaceHash: g.HashFull, Status: StatusReady,
-			PrivateIP: "10.0.0." + intToStr(int(srv.ID)+10),
+			ReplaceHash: g.HashFull, Status: reconciler.StatusReady,
+			PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
 		})
 	}
 
@@ -152,7 +155,7 @@ func TestApply_ScaleDown_InvokesRemoveHooks_NotPreflight(t *testing.T) {
 	g.Actions.BeforeRemove = recordingAction{calls: &beforeRemoveCalls, slots: &beforeRemoveSlots}
 	g.Actions.PostRemove = recordingAction{calls: &postRemoveCalls}
 
-	r := New(c)
+	r := reconciler.New(c)
 	state, err := r.Apply(context.Background(), g, prior, nil)
 	require.NoError(t, err)
 
@@ -160,67 +163,63 @@ func TestApply_ScaleDown_InvokesRemoveHooks_NotPreflight(t *testing.T) {
 	require.Equal(t, int32(2), beforeRemoveCalls, "before_remove must fire for each removed slot")
 	require.Equal(t, int32(2), postRemoveCalls, "post_remove must fire for each removed slot")
 	require.Equal(t, []int{4, 3}, beforeRemoveSlots, "scale-down walks slots in reverse order")
-	require.Equal(t, 2, c.deleteCalls)
-	require.Equal(t, 0, c.createCalls)
+	require.Equal(t, 2, c.DeleteCalls)
+	require.Equal(t, 0, c.CreateCalls)
 }
 
 func TestApply_ScaleUp_OnlyCreatesNewSlots(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(3) // grow to 3
 	// existing: 2 slots
-	prior := State{}
+	prior := reconciler.State{}
 	for i := 0; i < 2; i++ {
-		srv := c.seedServer(testGroup, i, 1, testNetwork)
-		prior.Slots = append(prior.Slots, SlotState{
+		srv := c.SeedServer(testGroup, i, 1, testNetwork)
+		prior.Slots = append(prior.Slots, reconciler.SlotState{
 			SlotID: i, ServerID: srv.ID, ServerName: srv.Name,
-			Generation: 1, ReplaceHash: g.HashFull, Status: StatusReady,
-			PrivateIP: "10.0.0." + intToStr(int(srv.ID)+10),
+			Generation: 1, ReplaceHash: g.HashFull, Status: reconciler.StatusReady,
+			PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
 		})
 	}
 
-	r := New(c)
+	r := reconciler.New(c)
 	state, err := r.Apply(context.Background(), g, prior, nil)
 	require.NoError(t, err)
 	require.Len(t, state.Slots, 3)
-	require.Equal(t, 1, c.createCalls)
-	require.Equal(t, 0, c.deleteCalls)
+	require.Equal(t, 1, c.CreateCalls)
+	require.Equal(t, 0, c.DeleteCalls)
 }
 
 func TestApply_PreflightCleansOrphans_NotInStateOutOfRange(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(2)
 
 	// Seed a complete=false orphan for slot 0 - simulates a crashed
 	// mid-create from the previous apply.
-	c.seedServer(testGroup, 0, 1, testNetwork)
-	for id, s := range c.servers {
-		s.Labels["hcloudgroup.io/complete"] = "false"
-		c.servers[id] = s
-	}
+	c.SeedOrphan(testGroup, 0, 1, testNetwork)
 
 	// Seed a healthy slot 5 with NO entry in tofu state - simulates a
 	// crashed scale-down from the previous apply.
-	c.seedServer(testGroup, 5, 1, testNetwork)
+	c.SeedServer(testGroup, 5, 1, testNetwork)
 
-	r := New(c)
-	state, err := r.Apply(context.Background(), g, State{}, nil)
+	r := reconciler.New(c)
+	state, err := r.Apply(context.Background(), g, reconciler.State{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, state.Slots, 2)
-	require.Equal(t, 2, c.deleteCalls, "preflight destroys orphan + straggler")
-	require.Equal(t, 2, c.createCalls, "two slots freshly created (the orphan was reset)")
+	require.Equal(t, 2, c.DeleteCalls, "preflight destroys orphan + straggler")
+	require.Equal(t, 2, c.CreateCalls, "two slots freshly created (the orphan was reset)")
 }
 
 func TestProgressFn_FiresAfterEachSlot(t *testing.T) {
-	c := newFakeClient()
+	c := hcloudxtest.NewFake()
 	g := defaultGroup(3)
 	var snapshotsLen []int
-	progress := func(_ context.Context, snap State) error {
+	progress := func(_ context.Context, snap reconciler.State) error {
 		snapshotsLen = append(snapshotsLen, len(snap.Slots))
 		return nil
 	}
-	r := New(c)
-	_, err := r.Apply(context.Background(), g, State{}, progress)
+	r := reconciler.New(c)
+	_, err := r.Apply(context.Background(), g, reconciler.State{}, progress)
 	require.NoError(t, err)
 	require.Equal(t, []int{1, 2, 3}, snapshotsLen, "progress must fire after each slot completes")
 }
@@ -229,11 +228,11 @@ func TestProgressFn_FiresAfterEachSlot(t *testing.T) {
 // client returns instantly so anything taking more than a second
 // indicates a deadlock or unintended sleep.
 func TestApply_CompletesQuickly(t *testing.T) {
-	c := newFakeClient()
-	r := New(c)
+	c := hcloudxtest.NewFake()
+	r := reconciler.New(c)
 	done := make(chan struct{})
 	go func() {
-		_, _ = r.Apply(context.Background(), defaultGroup(5), State{}, nil)
+		_, _ = r.Apply(context.Background(), defaultGroup(5), reconciler.State{}, nil)
 		close(done)
 	}()
 	select {
