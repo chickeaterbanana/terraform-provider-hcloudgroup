@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
+
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 )
 
@@ -85,19 +87,26 @@ func (rc *Reconciler) Destroy(ctx context.Context, group Group, prior State, onP
 	}
 
 	// Sweep any orphans that bypassed our state (e.g., crashed mid-create).
+	// WaitFor is outside the Retry closure so a transient wait failure
+	// doesn't re-issue DeleteServer (which would 404 on the second attempt).
 	for slotID, list := range r.observed {
 		for _, obs := range list {
 			if obs.Server == nil {
 				continue
 			}
+			var action *hcloud.Action
 			if err := hcloudx.Retry(ctx, func(ctx context.Context) error {
-				action, derr := rc.Client.DeleteServer(ctx, obs.Server.ID)
+				a, derr := rc.Client.DeleteServer(ctx, obs.Server.ID)
 				if derr != nil {
 					return derr
 				}
-				return hcloudx.WaitFor(ctx, rc.Client, action)
+				action = a
+				return nil
 			}); err != nil {
 				return *r.state, fmt.Errorf("destroy: sweep slot %d server %d: %w", slotID, obs.Server.ID, err)
+			}
+			if err := hcloudx.WaitFor(ctx, rc.Client, action); err != nil {
+				return *r.state, fmt.Errorf("destroy: sweep wait slot %d server %d: %w", slotID, obs.Server.ID, err)
 			}
 		}
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
+
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 )
 
@@ -41,14 +43,22 @@ func (r *runner) Apply(ctx context.Context) error {
 func (r *runner) preflight(ctx context.Context) error {
 	toDestroy := r.preflightTargets()
 	for _, srv := range toDestroy {
+		// WaitFor is outside the Retry closure: a transient WaitFor failure
+		// must not re-issue DeleteServer, which would 404 on the second
+		// attempt (server already gone) and surface as a terminal error.
+		var action *hcloud.Action
 		if err := hcloudx.Retry(ctx, func(ctx context.Context) error {
-			action, derr := r.client.DeleteServer(ctx, srv.ID)
+			a, derr := r.client.DeleteServer(ctx, srv.ID)
 			if derr != nil {
 				return derr
 			}
-			return hcloudx.WaitFor(ctx, r.client, action)
+			action = a
+			return nil
 		}); err != nil {
 			return fmt.Errorf("preflight: delete server %d: %w", srv.ID, err)
+		}
+		if err := hcloudx.WaitFor(ctx, r.client, action); err != nil {
+			return fmt.Errorf("preflight: wait delete server %d: %w", srv.ID, err)
 		}
 	}
 

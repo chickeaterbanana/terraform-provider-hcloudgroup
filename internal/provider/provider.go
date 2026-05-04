@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -75,7 +76,8 @@ func (p *HCloudgroupProvider) Configure(ctx context.Context, req provider.Config
 		token = os.Getenv("HCLOUD_TOKEN")
 	}
 	if token == "" {
-		resp.Diagnostics.AddError(
+		resp.Diagnostics.AddAttributeError(
+			path.Root("hcloud_token"),
 			"Missing hcloud_token",
 			"Set the hcloud_token provider attribute or the HCLOUD_TOKEN environment variable.",
 		)

@@ -153,10 +153,18 @@ func knownReplaceOnChangeNames() string {
 
 // canonicalStringSlice produces a stable representation of a string slice
 // independent of input ordering.
+//
+// The marshal error path is unreachable for []string but consuming it
+// silently would let two different inputs collapse to the empty string
+// and produce identical hashes — so fall back to the error text the way
+// hash.go does for the same reason.
 func canonicalStringSlice(in []string) string {
 	cp := append([]string(nil), in...)
 	sort.Strings(cp)
-	b, _ := json.Marshal(cp)
+	b, err := json.Marshal(cp)
+	if err != nil {
+		return "marshal-error:" + err.Error()
+	}
 	return string(b)
 }
 
@@ -172,7 +180,10 @@ func canonicalStringMap(in map[string]string) string {
 	for _, k := range keys {
 		pairs = append(pairs, [2]string{k, in[k]})
 	}
-	b, _ := json.Marshal(pairs)
+	b, err := json.Marshal(pairs)
+	if err != nil {
+		return "marshal-error:" + err.Error()
+	}
 	return string(b)
 }
 

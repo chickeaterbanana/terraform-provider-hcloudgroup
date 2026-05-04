@@ -51,6 +51,12 @@ func (r *runner) ReplaceSlot(ctx context.Context, slotID, newGeneration int) err
 	}
 
 	created := r.state.SlotByID(slotID)
+	if created == nil {
+		// innerCreate is supposed to Upsert before returning success, so
+		// reaching here with a nil slot would mean a programming bug —
+		// fail loudly rather than panic on the next field access.
+		return r.markFailed(slotID, "post_replace", errSlotInactive, "", "")
+	}
 	srvAfter, _ := r.serverFor(slotID)
 	scAfter := r.buildSlotCtx(slotID, created.Generation, srvAfter)
 	if res := runAction(ctx, r.group.Actions.PostReplace, scAfter); res.Err != nil {
