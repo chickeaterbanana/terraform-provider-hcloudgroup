@@ -32,7 +32,11 @@ jobs:
         with:
           go-version: "1.25.x"
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v8 is the first action release that understands the
+      # golangci-lint v2 config schema (".golangci.yml: version: \"2\"").
+      # Earlier action versions silently fail to parse the config and
+      # exit non-zero.
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
 
