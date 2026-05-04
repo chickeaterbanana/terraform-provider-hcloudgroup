@@ -1,4 +1,4 @@
-package resource_server_group
+package servergroup
 
 import (
 	"context"
@@ -36,8 +36,8 @@ func (r *ServerGroupResource) Schema(ctx context.Context, _ resource.SchemaReque
 			},
 			"replicas": schema.Int64Attribute{
 				Required:    true,
-				Description: "Number of slots in the group. Must be >= 1. (Named 'replicas' rather than 'count' because Terraform reserves 'count' as a meta-argument on every resource.)",
-				Validators:  []validator.Int64{int64validator.AtLeast(1)},
+				Description: "Number of slots in the group. Must be 1..999. The upper bound pairs with the deterministic server-name budget (group-slot-generation must fit RFC 1123's 63-char limit; see internal/servergroup/validators.go). (Named 'replicas' rather than 'count' because Terraform reserves 'count' as a meta-argument on every resource.)",
+				Validators:  []validator.Int64{int64validator.Between(1, 999)},
 			},
 			"image": schema.StringAttribute{
 				Required:    true,
@@ -78,6 +78,9 @@ func (r *ServerGroupResource) Schema(ctx context.Context, _ resource.SchemaReque
 			"current_replace_hash": schema.StringAttribute{
 				Computed:    true,
 				Description: "SHA-256 of the current desired hash inputs. For drift inspection.",
+				PlanModifiers: []planmodifier.String{
+					newReplaceHashPlanModifier(),
+				},
 			},
 			"slots": schema.ListNestedAttribute{
 				Computed:    true,

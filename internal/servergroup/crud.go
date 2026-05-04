@@ -1,4 +1,4 @@
-package resource_server_group
+package servergroup
 
 import (
 	"context"
@@ -82,6 +82,11 @@ func (r *ServerGroupResource) Read(ctx context.Context, req resource.ReadRequest
 	observed, err := rec.Observe(ctx, group, priorState)
 	if err != nil {
 		resp.Diagnostics.AddError("read failed", err.Error())
+		return
+	}
+
+	if shouldRemoveResource(observed, priorState) {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -218,6 +223,18 @@ func (r *ServerGroupResource) ImportState(ctx context.Context, req resource.Impo
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, importNamePath(), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, importIDPath(), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("replicas"), int64(replicas))...)
+}
+
+// shouldRemoveResource decides whether Read should drop the resource
+// from tofu state because every managed server has been deleted
+// out-of-band. The guard on prior.Slots prevents accidental removal
+// during a freshly-imported resource whose slots attribute is not yet
+// populated (ImportState seeds only name/id/replicas; the framework's
+// subsequent Read populates slots from labels). Idiomatic Terraform
+// behavior on "resource gone" is RemoveResource so the next plan
+// presents as `+ create` rather than `~ update`.
+func shouldRemoveResource(observed reconciler.State, prior reconciler.State) bool {
+	return len(observed.Slots) == 0 && len(prior.Slots) > 0
 }
 
 // importedReplicaCount derives the desired replica count from the highest

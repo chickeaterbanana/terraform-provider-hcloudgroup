@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 )
@@ -92,9 +92,11 @@ func (h HashInputs) Hash() (full string, prefix string) {
 	canonical := h.canonicalForm()
 	b, err := json.Marshal(canonical)
 	if err != nil {
-		// json.Marshal of plain types/slices/strings cannot fail; fall
-		// back to a defensive string representation rather than panic.
-		b = []byte(strings.ReplaceAll(err.Error(), "\n", " "))
+		// json.Marshal of plain types/slices/strings cannot fail. If it
+		// ever does, fail loud — a fallback string representation could
+		// silently collapse two different inputs to the same hash and
+		// hide a real replace.
+		panic(fmt.Sprintf("hash: marshal canonical form: %v", err))
 	}
 	sum := sha256.Sum256(b)
 	full = hex.EncodeToString(sum[:])

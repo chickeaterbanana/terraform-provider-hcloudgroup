@@ -48,9 +48,11 @@ func providerVars(sc slotctx.SlotContext) map[string]string {
 		v[HCLOUDGROUPPrefix+"PRIVATE_IP"] = sc.PrivateIP
 	}
 
-	peersJSON, _ := json.Marshal(sc.Peers)
-	if peersJSON == nil {
-		peersJSON = []byte("[]")
+	peersJSON, err := json.Marshal(sc.Peers)
+	if err != nil {
+		// Peer is a flat struct of string/int; json.Marshal cannot fail
+		// here. If it ever does, fail loud rather than silently emit "[]".
+		panic(fmt.Sprintf("env: marshal peers: %v", err))
 	}
 	v[HCLOUDGROUPPrefix+"PEERS_JSON"] = string(peersJSON)
 

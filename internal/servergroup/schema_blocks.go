@@ -1,4 +1,4 @@
-package resource_server_group
+package servergroup
 
 import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -43,7 +43,8 @@ func commandSchemaBlock() schema.Block {
 			},
 			"stdin": schema.StringAttribute{
 				Optional:    true,
-				Description: "Bytes fed to the command's stdin.",
+				Sensitive:   true,
+				Description: "Bytes fed to the command's stdin. Marked sensitive — operators commonly pipe secrets via stdin.",
 			},
 			"working_dir": schema.StringAttribute{
 				Optional:    true,
@@ -91,7 +92,11 @@ func probeCommandSchemaBlock() schema.Block {
 				ElementType: types.StringType,
 				Validators:  envKeyNamespaceValidators(),
 			},
-			"stdin":       schema.StringAttribute{Optional: true},
+			"stdin": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				Description: "Bytes fed to the command's stdin. Marked sensitive — operators commonly pipe secrets via stdin.",
+			},
 			"working_dir": schema.StringAttribute{Optional: true},
 			"expected_exit": schema.SetAttribute{
 				Optional:    true,

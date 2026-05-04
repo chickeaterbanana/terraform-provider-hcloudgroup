@@ -1,4 +1,4 @@
-package resource_server_group
+package servergroup
 
 import (
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -9,8 +9,9 @@ import (
 // to attribute names; nested blocks are pointers so absence is
 // distinguishable from explicit-nil.
 type resourceModel struct {
-	ID                 types.String `tfsdk:"id"`
-	Name               types.String `tfsdk:"name"`
+	ID   types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	// Count maps to HCL "replicas" — Terraform reserves "count".
 	Count              types.Int64  `tfsdk:"replicas"`
 	Image              types.String `tfsdk:"image"`
 	ServerType         types.String `tfsdk:"server_type"`

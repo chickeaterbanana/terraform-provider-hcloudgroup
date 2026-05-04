@@ -1,4 +1,4 @@
-package resource_server_group
+package servergroup
 
 import (
 	"context"
@@ -18,10 +18,12 @@ import (
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/reconciler"
 )
 
-// modelToGroup builds the desired-state input for the reconciler from the
-// HCL plan. It returns the group together with the (full, prefix) hash
-// pair so the caller can also write current_replace_hash back to state.
-func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, string, string, diag.Diagnostics) {
+// modelHashInputs derives reconciler.HashInputs from a plan/state model.
+// Shared between modelToGroup (which builds the full Group for the
+// reconciler) and the current_replace_hash PlanModifier (which only needs
+// the hash so the planned value is known before apply, not "(known after
+// apply)"). Both paths must produce the same hash for the same inputs.
+func modelHashInputs(ctx context.Context, m resourceModel) (reconciler.HashInputs, []string, map[string]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	sshKeys, d := stringList(ctx, m.SSHKeys)
@@ -32,8 +34,37 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 	diags.Append(d...)
 
 	if diags.HasError() {
+		return reconciler.HashInputs{}, nil, nil, diags
+	}
+
+	extras, ed := extrasFromReplaceOnChange(replaceOnChange, m, sshKeys, labels)
+	diags.Append(ed...)
+	if diags.HasError() {
+		return reconciler.HashInputs{}, nil, nil, diags
+	}
+
+	return reconciler.HashInputs{
+		Image:            m.Image.ValueString(),
+		ServerType:       m.ServerType.ValueString(),
+		UserDataTemplate: m.UserDataTemplate.ValueString(),
+		NetworkID:        m.NetworkID.ValueInt64(),
+		Location:         m.Location.ValueString(),
+		SSHKeys:          append([]string(nil), sshKeys...),
+		Labels:           cloneMap(labels),
+		Extras:           extras,
+	}, sshKeys, labels, diags
+}
+
+// modelToGroup builds the desired-state input for the reconciler from the
+// HCL plan. It returns the group together with the (full, prefix) hash
+// pair so the caller can also write current_replace_hash back to state.
+func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, string, string, diag.Diagnostics) {
+	hi, sshKeys, labels, diags := modelHashInputs(ctx, m)
+	if diags.HasError() {
 		return reconciler.Group{}, "", "", diags
 	}
+
+	full, prefix := hi.Hash()
 
 	g := reconciler.Group{
 		Name:             m.Name.ValueString(),
@@ -45,23 +76,9 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 		SSHKeyNames:      sshKeys,
 		UserLabels:       labels,
 		UserDataTemplate: m.UserDataTemplate.ValueString(),
+		HashFull:         full,
+		HashPrefix:       prefix,
 	}
-
-	extras, ed := extrasFromReplaceOnChange(replaceOnChange, m, sshKeys, labels)
-	diags.Append(ed...)
-	hi := reconciler.HashInputs{
-		Image:            g.Image,
-		ServerType:       g.ServerType,
-		UserDataTemplate: g.UserDataTemplate,
-		NetworkID:        g.NetworkID,
-		Location:         g.Location,
-		SSHKeys:          append([]string(nil), sshKeys...),
-		Labels:           cloneMap(labels),
-		Extras:           extras,
-	}
-	full, prefix := hi.Hash()
-	g.HashFull = full
-	g.HashPrefix = prefix
 
 	for _, hook := range []struct {
 		name string
@@ -154,16 +171,15 @@ func knownReplaceOnChangeNames() string {
 // canonicalStringSlice produces a stable representation of a string slice
 // independent of input ordering.
 //
-// The marshal error path is unreachable for []string but consuming it
-// silently would let two different inputs collapse to the empty string
-// and produce identical hashes — so fall back to the error text the way
-// hash.go does for the same reason.
+// json.Marshal cannot fail on []string; if it ever does, panic — silently
+// returning an "marshal-error: ..." string would collapse different
+// inputs to the same hash and hide a real replace.
 func canonicalStringSlice(in []string) string {
 	cp := append([]string(nil), in...)
 	sort.Strings(cp)
 	b, err := json.Marshal(cp)
 	if err != nil {
-		return "marshal-error:" + err.Error()
+		panic(fmt.Sprintf("convert: marshal string slice: %v", err))
 	}
 	return string(b)
 }
@@ -182,7 +198,7 @@ func canonicalStringMap(in map[string]string) string {
 	}
 	b, err := json.Marshal(pairs)
 	if err != nil {
-		return "marshal-error:" + err.Error()
+		panic(fmt.Sprintf("convert: marshal string map: %v", err))
 	}
 	return string(b)
 }
@@ -298,9 +314,12 @@ func mustParseDuration(s string) time.Duration {
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
-		// Validators reject this at plan time; if we somehow get here,
-		// fail loudly via a sentinel that the runner will surface.
-		return 0
+		// Validators reject malformed durations at plan time. Reaching
+		// here means the validator and this parser have diverged — a
+		// contract bug; fail loud rather than silently emit a 0-duration
+		// command (which would only surface as "timeout must be > 0"
+		// inside the action runner, far from the offending HCL).
+		panic(fmt.Sprintf("convert: duration %q failed validation: %v", s, err))
 	}
 	return d
 }
