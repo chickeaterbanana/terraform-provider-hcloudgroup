@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
@@ -102,9 +103,26 @@ func (r *runner) innerCreate(ctx context.Context, slotID, generation int) error 
 	}
 
 	// Re-fetch so PrivateNet is populated. The Create response does not
-	// always contain network attachments synchronously.
-	if reread, gerr := r.client.GetServer(ctx, srv.ID); gerr == nil && reread != nil {
+	// always contain network attachments synchronously, so the original
+	// response's PrivateNet may be empty even after a successful create.
+	// A failed re-read here would mean falling back to that empty struct
+	// and writing an empty ip_private into state — silently breaking
+	// templates and probes that read $HCLOUDGROUP_PRIVATE_IP. Retry the
+	// re-read on transient errors and fail the slot loudly if it never
+	// returns a populated server.
+	err = hcloudx.Retry(ctx, func(ctx context.Context) error {
+		reread, gerr := r.client.GetServer(ctx, srv.ID)
+		if gerr != nil {
+			return gerr
+		}
+		if reread == nil {
+			return fmt.Errorf("get server %d: nil server", srv.ID)
+		}
 		srv = reread
+		return nil
+	})
+	if err != nil {
+		return r.markFailed(slotID, "server_get_after_create", err, "", "")
 	}
 	r.recordObserved(slotID, srv, generation, false)
 
@@ -130,7 +148,14 @@ func (r *runner) innerCreate(ctx context.Context, slotID, generation int) error 
 		return r.markFailed(slotID, "post_create", res.Err, res.Stdout, res.Stderr)
 	}
 
-	if err := hcloudx.SetProviderLabel(ctx, r.client, srv.ID, hcloudx.LabelComplete, "true"); err != nil {
+	// Wrap in Retry: SetProviderLabel is a GET+PUT pair and idempotent, so
+	// transient 5xx / rate-limit / lock errors must be retried like the
+	// surrounding CreateServer/DeleteServer calls. Without this a network
+	// blip during the complete=true flip leaves a healthy server marked
+	// incomplete and the next apply destroys it as an orphan.
+	if err := hcloudx.Retry(ctx, func(ctx context.Context) error {
+		return hcloudx.SetProviderLabel(ctx, r.client, srv.ID, hcloudx.LabelComplete, "true")
+	}); err != nil {
 		return r.markFailed(slotID, "label_complete", err, "", "")
 	}
 	r.recordObserved(slotID, srv, generation, true)

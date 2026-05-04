@@ -25,13 +25,21 @@ type ProgressFn func(ctx context.Context, snapshot State) error
 // client wrapper, the desired group spec, the in-memory state, the
 // observed-servers map (slot -> all observations), and the
 // progress-reporting callback.
+//
+// genHighWater holds the maximum generation seen per slot at the moment
+// pre-flight ran, including any orphans pre-flight is about to destroy.
+// This pins the README §5.4 contract that the next generation must be
+// max(observed)+1 across both canonical AND orphan, so a recreated server
+// cannot collide with the just-deleted orphan's name (Hetzner refuses
+// duplicate server names; the resulting 409 is opaque to the operator).
 type runner struct {
-	client      hcloudx.Client
-	group       Group
-	state       *State
-	observed    map[int][]hcloudx.Observation
-	resolvedSSH []*hcloud.SSHKey
-	onProgress  ProgressFn
+	client       hcloudx.Client
+	group        Group
+	state        *State
+	observed     map[int][]hcloudx.Observation
+	genHighWater map[int]int
+	resolvedSSH  []*hcloud.SSHKey
+	onProgress   ProgressFn
 }
 
 // reportProgress writes the current state snapshot to the caller. Any
@@ -64,9 +72,18 @@ func (r *runner) markFailed(slotID int, phase string, cause error, stdout, stder
 // nextGenerationFor returns the next generation number for a slot,
 // derived from the maximum generation seen across both canonical and
 // orphan servers (spec section 5.4). When the slot is brand-new the
-// observed list is empty and the result is 1.
+// pre-cleanup high-water entry is zero and the result is 1.
+//
+// Reads from genHighWater (snapshotted before pre-flight cleanup) rather
+// than r.observed: the latter loses orphan generations once pre-flight
+// destroys them, which would let a new server collide with a just-deleted
+// orphan's name.
 func (r *runner) nextGenerationFor(slotID int) int {
-	return hcloudx.MaxObservedGeneration(r.observed[slotID]) + 1
+	gen := r.genHighWater[slotID]
+	if cur := hcloudx.MaxObservedGeneration(r.observed[slotID]); cur > gen {
+		gen = cur
+	}
+	return gen + 1
 }
 
 // runAction wraps an Action.Run with normalization: nil becomes Null, and
@@ -125,15 +142,6 @@ func (r *runner) renderUserData(sc slotctx.SlotContext) (string, error) {
 		return "", fmt.Errorf("user_data render: %w", err)
 	}
 	return out, nil
-}
-
-// resultErr is a small helper that converts an actions.Result into a
-// concise error description (or nil when the action succeeded).
-func resultErr(r actions.Result) error {
-	if r.Err != nil {
-		return r.Err
-	}
-	return nil
 }
 
 // errSlotInactive is returned when a flow tries to operate on a slot

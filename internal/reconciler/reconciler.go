@@ -30,16 +30,32 @@ func (rc *Reconciler) Apply(ctx context.Context, group Group, prior State, onPro
 	if err != nil {
 		return prior, fmt.Errorf("resolve ssh keys: %w", err)
 	}
+	observed := hcloudx.PartitionBySlot(servers)
 	r := &runner{
-		client:      rc.Client,
-		group:       group,
-		state:       &State{Slots: append([]SlotState(nil), prior.Slots...)},
-		observed:    hcloudx.PartitionBySlot(servers),
-		resolvedSSH: resolved,
-		onProgress:  onProgress,
+		client:       rc.Client,
+		group:        group,
+		state:        &State{Slots: append([]SlotState(nil), prior.Slots...)},
+		observed:     observed,
+		genHighWater: snapshotGenerations(observed),
+		resolvedSSH:  resolved,
+		onProgress:   onProgress,
 	}
 	err = r.Apply(ctx)
 	return *r.state, err
+}
+
+// snapshotGenerations records the maximum generation seen per slot before
+// pre-flight runs. The runner uses this snapshot in nextGenerationFor so
+// destroying an orphan in pre-flight does not retroactively allow a fresh
+// create at the orphan's just-vacated generation (which would collide on
+// server name; Hetzner returns 409 Conflict and the provider retries
+// opaquely for ~5 minutes).
+func snapshotGenerations(observed map[int][]hcloudx.Observation) map[int]int {
+	out := make(map[int]int, len(observed))
+	for slotID, obs := range observed {
+		out[slotID] = hcloudx.MaxObservedGeneration(obs)
+	}
+	return out
 }
 
 // Destroy walks every slot through the REMOVE FLOW. It does not run
@@ -50,14 +66,16 @@ func (rc *Reconciler) Destroy(ctx context.Context, group Group, prior State, onP
 	if err != nil {
 		return prior, fmt.Errorf("list servers: %w", err)
 	}
+	observed := hcloudx.PartitionBySlot(servers)
 	r := &runner{
-		client:     rc.Client,
-		group:      group,
-		state:      &State{Slots: append([]SlotState(nil), prior.Slots...)},
-		observed:   hcloudx.PartitionBySlot(servers),
-		onProgress: onProgress,
+		client:       rc.Client,
+		group:        group,
+		state:        &State{Slots: append([]SlotState(nil), prior.Slots...)},
+		observed:     observed,
+		genHighWater: snapshotGenerations(observed),
+		onProgress:   onProgress,
 	}
-	for i := highestSlotID(r.state) ; i >= 0; i-- {
+	for i := highestSlotID(r.state); i >= 0; i-- {
 		if r.state.SlotByID(i) == nil {
 			continue
 		}
