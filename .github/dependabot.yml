@@ -1,0 +1,38 @@
+# Dependabot config. Two ecosystems matter for this provider:
+#   - gomod: framework + SDK updates (security + features)
+#   - github-actions: supply-chain hygiene on the release pipeline
+# Both run Monday mornings UTC; minor/patch updates are grouped to keep
+# PR noise low while still surfacing major bumps individually.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(go)"
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
