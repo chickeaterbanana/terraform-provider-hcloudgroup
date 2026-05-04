@@ -5,9 +5,11 @@ import (
 	"errors"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/reconciler"
 )
 
@@ -178,12 +180,59 @@ func (r *ServerGroupResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 }
 
-// ImportState supports `terraform import` by group name. We treat the
-// import id as the group name; subsequent Read populates the rest from
-// labels.
+// ImportState supports `terraform import` by group name. The import id is
+// the group name. We discover existing servers via the labels selector,
+// derive `replicas` from the highest slot label, and seed name/id/replicas
+// so the framework's subsequent Read can populate `slots` correctly.
+//
+// Without seeding replicas, Read would call Observe with replicas=0 and
+// produce an empty slot list; the next apply would treat the existing
+// servers as foreign (they're labeled complete=true so pre-flight does
+// not destroy them) and create fresh servers, leaving the operator with
+// double the servers per slot.
+//
+// The user-required attributes (image, server_type, location, network_id,
+// etc.) are not seeded — those must be supplied via HCL after import,
+// which is the standard tofu import flow ("import then write the resource
+// block"). Plan will then surface any drift between HCL and the imported
+// servers as a rolling-replace diff.
 func (r *ServerGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if r.Client == nil {
+		resp.Diagnostics.AddError("import: provider not configured",
+			"the provider must be configured before importing; this typically means HCLOUD_TOKEN is missing")
+		return
+	}
+	servers, err := r.Client.ListByGroup(ctx, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("import: list servers", err.Error())
+		return
+	}
+	replicas := importedReplicaCount(hcloudx.PartitionBySlot(servers))
+	if replicas == 0 {
+		resp.Diagnostics.AddError("import: no servers found",
+			"no hcloud servers carry the labels for group "+req.ID+
+				" (managed-by=hcloudgroup-provider, group="+req.ID+"); nothing to import")
+		return
+	}
+
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, importNamePath(), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, importIDPath(), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("replicas"), int64(replicas))...)
+}
+
+// importedReplicaCount derives the desired replica count from the highest
+// slot index seen across the imported servers. Slot indices are zero-based
+// so a single server at slot 0 yields replicas=1. Servers missing a slot
+// label are ignored (they may be foreign even though the selector matched
+// the group label).
+func importedReplicaCount(observed map[int][]hcloudx.Observation) int {
+	highest := -1
+	for slotID := range observed {
+		if slotID > highest {
+			highest = slotID
+		}
+	}
+	return highest + 1
 }
 
 func appendApplyError(diags *diag.Diagnostics, err error) {

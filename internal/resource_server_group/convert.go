@@ -2,12 +2,16 @@ package resource_server_group
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/actions"
@@ -43,6 +47,8 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 		UserDataTemplate: m.UserDataTemplate.ValueString(),
 	}
 
+	extras, ed := extrasFromReplaceOnChange(replaceOnChange, m, sshKeys, labels)
+	diags.Append(ed...)
 	hi := reconciler.HashInputs{
 		Image:            g.Image,
 		ServerType:       g.ServerType,
@@ -51,97 +57,227 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 		Location:         g.Location,
 		SSHKeys:          append([]string(nil), sshKeys...),
 		Labels:           cloneMap(labels),
-		Extras:           extrasFromReplaceOnChange(replaceOnChange),
+		Extras:           extras,
 	}
 	full, prefix := hi.Hash()
 	g.HashFull = full
 	g.HashPrefix = prefix
 
-	g.Actions = reconciler.ActionSet{
-		BeforeCreate:  actionFromBlock(m.BeforeCreate),
-		PostCreate:    actionFromBlock(m.PostCreate),
-		BeforeReplace: actionFromBlock(m.BeforeReplace),
-		PostReplace:   actionFromBlock(m.PostReplace),
-		BeforeRemove:  actionFromBlock(m.BeforeRemove),
-		PostRemove:    actionFromBlock(m.PostRemove),
+	for _, hook := range []struct {
+		name string
+		blk  *actionBlock
+		dst  *actions.Action
+	}{
+		{"before_create", m.BeforeCreate, &g.Actions.BeforeCreate},
+		{"post_create", m.PostCreate, &g.Actions.PostCreate},
+		{"before_replace", m.BeforeReplace, &g.Actions.BeforeReplace},
+		{"post_replace", m.PostReplace, &g.Actions.PostReplace},
+		{"before_remove", m.BeforeRemove, &g.Actions.BeforeRemove},
+		{"post_remove", m.PostRemove, &g.Actions.PostRemove},
+	} {
+		a, ad := actionFromBlock(hook.blk, path.Root(hook.name))
+		diags.Append(ad...)
+		*hook.dst = a
 	}
 
-	probe, d := readinessFromBlock(ctx, m.ReadinessProbe)
+	probe, d := readinessFromBlock(ctx, m.ReadinessProbe, path.Root("readiness_probe"))
 	diags.Append(d...)
 	g.ReadinessProbe = probe
 
 	return g, full, prefix, diags
 }
 
-// extrasFromReplaceOnChange turns the user-supplied list of attribute
-// names into a map suitable for HashInputs.Extras. Each name becomes a
-// hash-affecting key; the value side is the literal string "1" so the
-// presence/absence (and ordering) of the list itself flips the hash.
+// replaceOnChangeResolvers maps each attribute name accepted in
+// `replace_on_change` to a function that serializes the model's current
+// value to a deterministic string. The resulting (name, serialized-value)
+// pair is fed into HashInputs.Extras so the hash flips when the *value*
+// of the listed attribute changes.
 //
-// In v1 every attribute the operator might list is already in the
-// always-on hash set, so this exists primarily as an explicit "force
-// replace" knob: adding or removing names from the list flips the hash
-// even when nothing else changed.
-func extrasFromReplaceOnChange(names []string) map[string]string {
+// Every attribute named here is also in the always-on hash set, so listing
+// it in replace_on_change is currently redundant. The knob is kept as the
+// documented extension point: future attributes added outside the always-
+// on set must be plumbed through here so listing them works as advertised.
+var replaceOnChangeResolvers = map[string]func(m resourceModel, sshKeys []string, labels map[string]string) string{
+	"image":       func(m resourceModel, _ []string, _ map[string]string) string { return m.Image.ValueString() },
+	"server_type": func(m resourceModel, _ []string, _ map[string]string) string { return m.ServerType.ValueString() },
+	"location":    func(m resourceModel, _ []string, _ map[string]string) string { return m.Location.ValueString() },
+	"network_id": func(m resourceModel, _ []string, _ map[string]string) string {
+		return strconv.FormatInt(m.NetworkID.ValueInt64(), 10)
+	},
+	"user_data_template": func(m resourceModel, _ []string, _ map[string]string) string { return m.UserDataTemplate.ValueString() },
+	"ssh_keys": func(_ resourceModel, sshKeys []string, _ map[string]string) string {
+		return canonicalStringSlice(sshKeys)
+	},
+	"labels": func(_ resourceModel, _ []string, labels map[string]string) string { return canonicalStringMap(labels) },
+}
+
+// extrasFromReplaceOnChange resolves each name in replace_on_change to its
+// current value via replaceOnChangeResolvers and produces the
+// HashInputs.Extras map. Unknown names are rejected at plan time — the
+// schema description promises "when changed, trigger a rolling replace",
+// so silently accepting a typoed attribute name would be a footgun (the
+// hash would never flip and the operator would assume the rolling replace
+// is wired up when it isn't).
+func extrasFromReplaceOnChange(names []string, m resourceModel, sshKeys []string, labels map[string]string) (map[string]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if len(names) == 0 {
-		return nil
+		return nil, diags
 	}
 	out := make(map[string]string, len(names))
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	for _, n := range sorted {
-		out[n] = "1"
+		resolver, ok := replaceOnChangeResolvers[n]
+		if !ok {
+			diags.AddAttributeError(
+				path.Root("replace_on_change"),
+				"Unknown attribute in replace_on_change",
+				fmt.Sprintf("%q is not a recognized attribute. Supported names: %s",
+					n, knownReplaceOnChangeNames()),
+			)
+			continue
+		}
+		out[n] = resolver(m, sshKeys, labels)
 	}
-	return out
+	return out, diags
 }
 
-func actionFromBlock(b *actionBlock) actions.Action {
+func knownReplaceOnChangeNames() string {
+	names := make([]string, 0, len(replaceOnChangeResolvers))
+	for k := range replaceOnChangeResolvers {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return "[" + strings.Join(names, ", ") + "]"
+}
+
+// canonicalStringSlice produces a stable representation of a string slice
+// independent of input ordering.
+func canonicalStringSlice(in []string) string {
+	cp := append([]string(nil), in...)
+	sort.Strings(cp)
+	b, _ := json.Marshal(cp)
+	return string(b)
+}
+
+// canonicalStringMap produces a stable representation of a string map
+// independent of map iteration order.
+func canonicalStringMap(in map[string]string) string {
+	keys := make([]string, 0, len(in))
+	for k := range in {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([][2]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, [2]string{k, in[k]})
+	}
+	b, _ := json.Marshal(pairs)
+	return string(b)
+}
+
+// actionFromBlock returns actions.Null{} when the outer block or its
+// inner command block is absent. When the inner command block is set,
+// the schema treats `command` and `timeout` as Optional (a workaround
+// for the framework's Required-attribute upward propagation); we
+// validate their presence here at convert time. blockPath identifies the
+// outer block (e.g., path.Root("before_create")) so diagnostics can
+// point operators to the offending HCL.
+func actionFromBlock(b *actionBlock, blockPath path.Path) (actions.Action, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if b == nil || b.Command == nil {
-		return actions.Null{}
+		return actions.Null{}, diags
 	}
-	return commandActionFromBlock(b.Command)
+	cmd, d := commandActionFromBlock(b.Command, blockPath.AtName("command"))
+	diags.Append(d...)
+	return cmd, diags
 }
 
-func commandActionFromBlock(c *commandBlock) actions.Action {
+func commandActionFromBlock(c *commandBlock, cmdPath path.Path) (actions.Action, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if c == nil {
-		return actions.Null{}
+		return actions.Null{}, diags
 	}
-	timeout := mustParseDuration(c.Timeout.ValueString())
+	command := c.Command.ValueString()
+	timeoutStr := c.Timeout.ValueString()
+	if command == "" {
+		diags.AddAttributeError(
+			cmdPath.AtName("command"),
+			"Missing required attribute: command",
+			"the `command` attribute must be set when the command block is configured",
+		)
+	}
+	if timeoutStr == "" {
+		diags.AddAttributeError(
+			cmdPath.AtName("timeout"),
+			"Missing required attribute: timeout",
+			"the `timeout` attribute must be set when the command block is configured",
+		)
+	}
+	if diags.HasError() {
+		// Don't return a half-built *actions.Command — a caller that ignores
+		// diagnostics could end up running an empty command.
+		return actions.Null{}, diags
+	}
 	return &actions.Command{
-		Command:      c.Command.ValueString(),
+		Command:      command,
 		Env:          stringMapValueOrNil(c.Env),
 		Stdin:        c.Stdin.ValueString(),
 		WorkingDir:   c.WorkingDir.ValueString(),
 		ExpectedExit: int64SetToInts(c.ExpectedExit),
-		Timeout:      timeout,
-	}
+		Timeout:      mustParseDuration(timeoutStr),
+	}, diags
 }
 
-func readinessFromBlock(_ context.Context, b *readinessProbeBlock) (*actions.ReadinessProbe, diag.Diagnostics) {
+func readinessFromBlock(_ context.Context, b *readinessProbeBlock, blockPath path.Path) (*actions.ReadinessProbe, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if b == nil || b.Command == nil {
 		return nil, diags
 	}
 	c := b.Command
-	timeout := mustParseDuration(c.Timeout.ValueString())
-	interval := mustParseDuration(c.Interval.ValueString())
-	totalTimeout := mustParseDuration(c.TotalTimeout.ValueString())
+	command := c.Command.ValueString()
+	timeoutStr := c.Timeout.ValueString()
+	intervalStr := c.Interval.ValueString()
+	totalStr := c.TotalTimeout.ValueString()
+	cmdPath := blockPath.AtName("command")
+	for _, p := range []struct {
+		name string
+		val  string
+	}{
+		{"command", command},
+		{"timeout", timeoutStr},
+		{"interval", intervalStr},
+		{"total_timeout", totalStr},
+	} {
+		if p.val == "" {
+			diags.AddAttributeError(
+				cmdPath.AtName(p.name),
+				"Missing required attribute: "+p.name,
+				"the `"+p.name+"` attribute must be set when the readiness_probe.command block is configured",
+			)
+		}
+	}
+	if diags.HasError() {
+		// Same reason as commandActionFromBlock: don't hand back a half-built
+		// probe alongside an error.
+		return nil, diags
+	}
 	threshold := int(c.SuccessThreshold.ValueInt64())
 	if threshold < 1 {
 		threshold = 1
 	}
 	return &actions.ReadinessProbe{
 		Command: actions.Command{
-			Command:      c.Command.ValueString(),
+			Command:      command,
 			Env:          stringMapValueOrNil(c.Env),
 			Stdin:        c.Stdin.ValueString(),
 			WorkingDir:   c.WorkingDir.ValueString(),
 			ExpectedExit: int64SetToInts(c.ExpectedExit),
-			Timeout:      timeout,
+			Timeout:      mustParseDuration(timeoutStr),
 		},
-		Interval:         interval,
+		Interval:         mustParseDuration(intervalStr),
 		SuccessThreshold: threshold,
-		TotalTimeout:     totalTimeout,
+		TotalTimeout:     mustParseDuration(totalStr),
 	}, diags
 }
 

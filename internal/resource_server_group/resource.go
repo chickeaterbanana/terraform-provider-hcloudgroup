@@ -8,17 +8,20 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
+	tmpl "github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/template"
 )
 
 // Compile-time interface checks ensure the resource implements the
 // framework optional interfaces we rely on.
 var (
-	_ resource.Resource                = (*ServerGroupResource)(nil)
-	_ resource.ResourceWithConfigure   = (*ServerGroupResource)(nil)
-	_ resource.ResourceWithImportState = (*ServerGroupResource)(nil)
+	_ resource.Resource                   = (*ServerGroupResource)(nil)
+	_ resource.ResourceWithConfigure      = (*ServerGroupResource)(nil)
+	_ resource.ResourceWithImportState    = (*ServerGroupResource)(nil)
+	_ resource.ResourceWithValidateConfig = (*ServerGroupResource)(nil)
 )
 
 // ServerGroupResource is the framework resource type. The hcloud client
@@ -49,4 +52,27 @@ func (r *ServerGroupResource) Configure(_ context.Context, req resource.Configur
 		return
 	}
 	r.Client = c
+}
+
+// ValidateConfig surfaces errors that don't depend on plan/state values
+// at plan time, before any server is created. Currently this parses
+// user_data_template (no rendering) so a syntactic error in the template
+// fails the plan rather than failing mid-apply after some slots have
+// already been created (README §11).
+func (r *ServerGroupResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var m resourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &m)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if m.UserDataTemplate.IsNull() || m.UserDataTemplate.IsUnknown() {
+		return
+	}
+	if err := tmpl.Parse(m.UserDataTemplate.ValueString()); err != nil {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("user_data_template"),
+			"Invalid user_data_template",
+			err.Error(),
+		)
+	}
 }

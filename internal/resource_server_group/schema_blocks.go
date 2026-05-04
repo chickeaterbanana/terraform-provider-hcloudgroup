@@ -20,12 +20,19 @@ func actionSchemaBlock(desc string) schema.Block {
 
 // commandSchemaBlock describes a shell command and its execution
 // parameters. Used inside every action block.
+//
+// Note: every attribute is Optional even though `command` and `timeout`
+// are semantically required when the block is configured. The framework
+// propagates inner-attribute Required upward and would force the outer
+// SingleNestedBlock to always be present in HCL — defeating the whole
+// "absent = null action" model. We validate non-empty `command` and
+// `timeout` in convert.go when the block is non-nil.
 func commandSchemaBlock() schema.Block {
 	return schema.SingleNestedBlock{
 		Description: "Shell command run via /bin/sh -c with a clean environment.",
 		Attributes: map[string]schema.Attribute{
 			"command": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "Shell command passed to /bin/sh -c. No template interpolation; dynamic values flow via env.",
 			},
 			"env": schema.MapAttribute{
@@ -48,8 +55,8 @@ func commandSchemaBlock() schema.Block {
 				Description: "Exit codes that count as success. Defaults to {0}.",
 			},
 			"timeout": schema.StringAttribute{
-				Required:    true,
-				Description: "Per-attempt timeout, e.g. 30s, 5m. Parsed by Go time.ParseDuration.",
+				Optional:    true,
+				Description: "Per-attempt timeout, e.g. 30s, 5m. Parsed by Go time.ParseDuration. Required when the block is set.",
 				Validators:  durationStringValidators(),
 			},
 		},
@@ -67,13 +74,17 @@ func readinessProbeSchemaBlock() schema.Block {
 	}
 }
 
+// probeCommandSchemaBlock: see comment on commandSchemaBlock about why
+// every attribute is Optional rather than Required. Convert-time
+// validation enforces presence of command, timeout, interval, and
+// total_timeout when the readiness_probe block is set.
 func probeCommandSchemaBlock() schema.Block {
 	return schema.SingleNestedBlock{
 		Description: "Probe command and its polling configuration.",
 		Attributes: map[string]schema.Attribute{
 			"command": schema.StringAttribute{
-				Required:    true,
-				Description: "Probe command. Same execution semantics as action commands.",
+				Optional:    true,
+				Description: "Probe command. Same execution semantics as action commands. Required when set.",
 			},
 			"env": schema.MapAttribute{
 				Optional:    true,
@@ -87,13 +98,13 @@ func probeCommandSchemaBlock() schema.Block {
 				ElementType: types.Int64Type,
 			},
 			"timeout": schema.StringAttribute{
-				Required:    true,
-				Description: "Per-attempt timeout.",
+				Optional:    true,
+				Description: "Per-attempt timeout. Required when set.",
 				Validators:  durationStringValidators(),
 			},
 			"interval": schema.StringAttribute{
-				Required:    true,
-				Description: "Wait between attempts.",
+				Optional:    true,
+				Description: "Wait between attempts. Required when set.",
 				Validators:  durationStringValidators(),
 			},
 			"success_threshold": schema.Int64Attribute{
@@ -101,8 +112,8 @@ func probeCommandSchemaBlock() schema.Block {
 				Description: "Consecutive successful attempts required. Defaults to 1.",
 			},
 			"total_timeout": schema.StringAttribute{
-				Required:    true,
-				Description: "Overall deadline; if exceeded, the probe fails.",
+				Optional:    true,
+				Description: "Overall deadline; if exceeded, the probe fails. Required when set.",
 				Validators:  durationStringValidators(),
 			},
 		},

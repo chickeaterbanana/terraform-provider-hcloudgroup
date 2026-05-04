@@ -34,9 +34,9 @@ func (r *ServerGroupResource) Schema(ctx context.Context, _ resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"count": schema.Int64Attribute{
+			"replicas": schema.Int64Attribute{
 				Required:    true,
-				Description: "Number of slots in the group. Must be >= 1.",
+				Description: "Number of slots in the group. Must be >= 1. (Named 'replicas' rather than 'count' because Terraform reserves 'count' as a meta-argument on every resource.)",
 				Validators:  []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"image": schema.StringAttribute{

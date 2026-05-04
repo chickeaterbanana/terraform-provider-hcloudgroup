@@ -32,6 +32,19 @@ type TemplateData struct {
 	Now        string
 }
 
+// Parse parses templateSrc without rendering. Used at plan time
+// (ValidateConfig) so syntactic errors fail fast instead of after the
+// reconciler has already started creating servers.
+func Parse(templateSrc string) error {
+	if templateSrc == "" {
+		return nil
+	}
+	if _, err := template.New("user_data").Parse(templateSrc); err != nil {
+		return fmt.Errorf("user_data_template parse: %w", err)
+	}
+	return nil
+}
+
 // Render parses and executes templateSrc with the slot-derived data. Peers
 // is the list of *other* slots; the slot's own ID/IP is not included
 // because user_data renders before the server exists.

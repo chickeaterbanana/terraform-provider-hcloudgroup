@@ -9,26 +9,26 @@ import (
 // to attribute names; nested blocks are pointers so absence is
 // distinguishable from explicit-nil.
 type resourceModel struct {
-	ID                types.String   `tfsdk:"id"`
-	Name              types.String   `tfsdk:"name"`
-	Count             types.Int64    `tfsdk:"count"`
-	Image             types.String   `tfsdk:"image"`
-	ServerType        types.String   `tfsdk:"server_type"`
-	Location          types.String   `tfsdk:"location"`
-	NetworkID         types.Int64    `tfsdk:"network_id"`
-	SSHKeys           types.List     `tfsdk:"ssh_keys"`
-	Labels            types.Map      `tfsdk:"labels"`
-	UserDataTemplate  types.String   `tfsdk:"user_data_template"`
-	ReplaceOnChange   types.Set      `tfsdk:"replace_on_change"`
-	Slots             types.List     `tfsdk:"slots"`
-	CurrentReplaceHash types.String  `tfsdk:"current_replace_hash"`
+	ID                 types.String `tfsdk:"id"`
+	Name               types.String `tfsdk:"name"`
+	Count              types.Int64  `tfsdk:"replicas"`
+	Image              types.String `tfsdk:"image"`
+	ServerType         types.String `tfsdk:"server_type"`
+	Location           types.String `tfsdk:"location"`
+	NetworkID          types.Int64  `tfsdk:"network_id"`
+	SSHKeys            types.List   `tfsdk:"ssh_keys"`
+	Labels             types.Map    `tfsdk:"labels"`
+	UserDataTemplate   types.String `tfsdk:"user_data_template"`
+	ReplaceOnChange    types.Set    `tfsdk:"replace_on_change"`
+	Slots              types.List   `tfsdk:"slots"`
+	CurrentReplaceHash types.String `tfsdk:"current_replace_hash"`
 
-	BeforeCreate   *actionBlock        `tfsdk:"before_create"`
-	PostCreate     *actionBlock        `tfsdk:"post_create"`
-	BeforeReplace  *actionBlock        `tfsdk:"before_replace"`
-	PostReplace    *actionBlock        `tfsdk:"post_replace"`
-	BeforeRemove   *actionBlock        `tfsdk:"before_remove"`
-	PostRemove     *actionBlock        `tfsdk:"post_remove"`
+	BeforeCreate   *actionBlock         `tfsdk:"before_create"`
+	PostCreate     *actionBlock         `tfsdk:"post_create"`
+	BeforeReplace  *actionBlock         `tfsdk:"before_replace"`
+	PostReplace    *actionBlock         `tfsdk:"post_replace"`
+	BeforeRemove   *actionBlock         `tfsdk:"before_remove"`
+	PostRemove     *actionBlock         `tfsdk:"post_remove"`
 	ReadinessProbe *readinessProbeBlock `tfsdk:"readiness_probe"`
 
 	Timeouts timeouts.Value `tfsdk:"timeouts"`
@@ -55,7 +55,7 @@ type commandBlock struct {
 
 // readinessProbeBlock wraps a commandBlock plus the polling parameters.
 type readinessProbeBlock struct {
-	Command          *probeCommandBlock `tfsdk:"command"`
+	Command *probeCommandBlock `tfsdk:"command"`
 }
 
 type probeCommandBlock struct {
@@ -68,16 +68,4 @@ type probeCommandBlock struct {
 	Interval         types.String `tfsdk:"interval"`
 	SuccessThreshold types.Int64  `tfsdk:"success_threshold"`
 	TotalTimeout     types.String `tfsdk:"total_timeout"`
-}
-
-// slotModel is one entry in the computed `slots` list.
-type slotModel struct {
-	SlotID      types.Int64  `tfsdk:"slot_id"`
-	ServerID    types.Int64  `tfsdk:"server_id"`
-	ServerName  types.String `tfsdk:"server_name"`
-	Generation  types.Int64  `tfsdk:"generation"`
-	ReplaceHash types.String `tfsdk:"replace_hash"`
-	PrivateIP   types.String `tfsdk:"ip_private"`
-	Status      types.String `tfsdk:"status"`
-	LastError   types.String `tfsdk:"last_error"`
 }

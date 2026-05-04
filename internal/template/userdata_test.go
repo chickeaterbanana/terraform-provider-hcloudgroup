@@ -46,6 +46,27 @@ func TestRender_BadTemplateReportsError(t *testing.T) {
 	require.Contains(t, err.Error(), "user_data_template")
 }
 
+// Parse is the plan-time hook used by the resource's ValidateConfig.
+// Empty input is a no-op so a missing user_data_template doesn't error.
+func TestParse_EmptyOK(t *testing.T) {
+	require.NoError(t, Parse(""))
+}
+
+// Parse must catch the same syntactic errors Render catches, but without
+// executing the template (no slot data is available at plan time).
+func TestParse_BadTemplateReportsError(t *testing.T) {
+	err := Parse("{{ .DoesNotClose")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "user_data_template parse")
+}
+
+// Parse accepts templates that *would* fail at execute time (missing
+// fields), because plan-time can't validate field references against the
+// generated SlotContext. This is intentional — it just rejects syntax.
+func TestParse_AcceptsExecuteTimeFailures(t *testing.T) {
+	require.NoError(t, Parse(`{{ .NoSuchField }}`))
+}
+
 func TestRender_ConsulPeersExample(t *testing.T) {
 	// Mirrors the spec section 9.2 example. Slot 0 has no peers; slot 1
 	// sees slot 0 as a retry_join target.
