@@ -67,11 +67,13 @@ jobs:
         env:
           TOFU_VERSION: "1.11.6"
         run: |
-          curl -sSfL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz" -o tofu.tar.gz
-          curl -sSfL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_SHA256SUMS" -o checksums.txt
-          sha256sum --check --ignore-missing checksums.txt
-          tar -xzf tofu.tar.gz -C /usr/local/bin tofu
-          rm tofu.tar.gz checksums.txt
+          BASE="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
+          ARCHIVE="tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL "${BASE}/${ARCHIVE}" -o "${ARCHIVE}"
+          curl -sSfL "${BASE}/tofu_${TOFU_VERSION}_SHA256SUMS" -o checksums.txt
+          grep " ${ARCHIVE}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${ARCHIVE}" -C /usr/local/bin tofu
+          rm "${ARCHIVE}" checksums.txt
       - run: make testacc
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
@@ -97,11 +99,13 @@ jobs:
         env:
           SYFT_VERSION: "1.44.0"
         run: |
-          curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" -o syft.tar.gz
-          curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt" -o checksums.txt
-          sha256sum --check --ignore-missing checksums.txt
-          tar -xzf syft.tar.gz -C /usr/local/bin syft
-          rm syft.tar.gz checksums.txt
+          BASE="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
+          ARCHIVE="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL "${BASE}/${ARCHIVE}" -o "${ARCHIVE}"
+          curl -sSfL "${BASE}/syft_${SYFT_VERSION}_checksums.txt" -o checksums.txt
+          grep " ${ARCHIVE}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${ARCHIVE}" -C /usr/local/bin syft
+          rm "${ARCHIVE}" checksums.txt
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         id: import_gpg
