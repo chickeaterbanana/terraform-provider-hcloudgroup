@@ -1,0 +1,31 @@
+name: Setup TF CLI
+description: |
+  Installs OpenTofu or Terraform on the runner. Wraps the upstream
+  vendor actions so SHA pins live in one place.
+
+inputs:
+  runtime:
+    description: 'Which CLI to install: "tofu" or "terraform".'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install OpenTofu
+      if: inputs.runtime == 'tofu'
+      uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb # v2.0.0
+      with:
+        tofu_wrapper: false
+
+    - name: Install Terraform
+      if: inputs.runtime == 'terraform'
+      uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+      with:
+        terraform_wrapper: false
+
+    - name: Reject unknown runtime
+      if: inputs.runtime != 'tofu' && inputs.runtime != 'terraform'
+      shell: bash
+      run: |
+        echo "setup-tf-cli: runtime must be 'tofu' or 'terraform' (got '${{ inputs.runtime }}')" >&2
+        exit 2

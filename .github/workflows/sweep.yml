@@ -1,0 +1,33 @@
+name: Sweep
+
+# Daily failsafe: reaps tfacc-* fixtures left behind when `if: always()`
+# can't fire (cancelled runner mid-apply, panic before destroy). Backs
+# up the per-run cleanup; never a replacement for it.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Sandbox is shared with acctest; sweeping mid-flight would tear down
+  # live test fixtures.
+  group: hcloud-sandbox
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Sweep stale fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - run: make sweep
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}

@@ -30,8 +30,16 @@ builds:
       - amd64
       - arm
       - arm64
+    # 32-bit ARM is not smoke-testable: no GH-hosted 32-bit ARM runner,
+    # cross-platform-actions FreeBSD covers only x86-64 + arm64, and
+    # Hetzner Cloud offers no 32-bit ARM. CI policy: every released
+    # binary must be exercised by smoke.
     ignore:
       - goos: darwin
+        goarch: arm
+      - goos: linux
+        goarch: arm
+      - goos: freebsd
         goarch: arm
     binary: '{{ .ProjectName }}_v{{ .Version }}'
 
