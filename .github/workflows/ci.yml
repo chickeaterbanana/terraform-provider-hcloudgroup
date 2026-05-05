@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GO_VERSION: "1.25.x"
+
 jobs:
   test:
     name: Hermetic tests
@@ -19,7 +22,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: "1.25.x"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       - run: go build ./...
       - run: go test -race -count=1 ./...
@@ -31,7 +34,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: "1.25.x"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       # v8 is the first action release that understands the
       # golangci-lint v2 config schema (".golangci.yml: version: \"2\"").
@@ -41,57 +44,205 @@ jobs:
         with:
           version: v2.4.0
 
+  build:
+    name: Build (snapshot)
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
+        with:
+          version: "~> v2"
+          args: build --snapshot --clean
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+
+  smoke-native:
+    name: Smoke native (${{ matrix.runtime }} ${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: [test, lint, build]
+    if: |
+      vars.SMOKE_DISABLED != 'true' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      )
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - { runtime: tofu,      goos: linux,  goarch: amd64, runner: ubuntu-latest }
+          - { runtime: tofu,      goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
+          - { runtime: tofu,      goos: darwin, goarch: amd64, runner: macos-13 }
+          - { runtime: tofu,      goos: darwin, goarch: arm64, runner: macos-14 }
+          - { runtime: terraform, goos: linux,  goarch: amd64, runner: ubuntu-latest }
+          - { runtime: terraform, goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
+          - { runtime: terraform, goos: darwin, goarch: amd64, runner: macos-13 }
+          - { runtime: terraform, goos: darwin, goarch: arm64, runner: macos-14 }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
+      - name: Compute resource suffix
+        id: suffix
+        shell: bash
+        run: |
+          SUFFIX="${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.runtime }}-${{ github.run_id }}"
+          if [ ${#SUFFIX} -gt 40 ]; then
+            echo "suffix '$SUFFIX' exceeds 40 chars; tighten naming or truncate" >&2
+            exit 2
+          fi
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+      - name: Stage provider for dev_overrides
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          WORKSPACE: ${{ github.workspace }}
+        run: sh ./.github/scripts/stage-provider.sh
+      - uses: ./.github/actions/setup-tf-cli
+        with:
+          runtime: ${{ matrix.runtime }}
+      - name: Apply
+        shell: bash
+        working-directory: internal/smoketest
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
+        run: |
+          set -euo pipefail
+          ${{ matrix.runtime }} init
+          ${{ matrix.runtime }} validate
+          ${{ matrix.runtime }} apply -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}"
+      - name: Destroy
+        if: always() && steps.suffix.outcome == 'success'
+        shell: bash
+        working-directory: internal/smoketest
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
+        run: |
+          ${{ matrix.runtime }} destroy -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}" || true
+
+  smoke-freebsd:
+    name: Smoke freebsd (${{ matrix.runtime }} ${{ matrix.goarch }})
+    needs: [test, lint, build]
+    # GitHub does not host FreeBSD runners, so the leg runs inside a
+    # QEMU VM via cross-platform-actions. Same gate as smoke-native.
+    if: |
+      vars.SMOKE_DISABLED != 'true' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      )
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - { runtime: tofu,      goarch: amd64, vm_arch: x86-64 }
+          - { runtime: tofu,      goarch: arm64, vm_arch: arm64 }
+          - { runtime: terraform, goarch: amd64, vm_arch: x86-64 }
+          - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
+      - name: Compute resource suffix
+        id: suffix
+        shell: bash
+        run: |
+          SUFFIX="freebsd-${{ matrix.goarch }}-${{ matrix.runtime }}-${{ github.run_id }}"
+          if [ ${#SUFFIX} -gt 40 ]; then
+            echo "suffix '$SUFFIX' exceeds 40 chars" >&2
+            exit 2
+          fi
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+      - name: Smoke (apply + destroy)
+        # Pinned to v0.32.0 (node20). v1.0.0 uses node24 which not all
+        # runner images accept yet.
+        uses: cross-platform-actions/action@492b0c80085400348c599edace11141a4ee73524 # v0.32.0
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          MATRIX_RUNTIME: ${{ matrix.runtime }}
+          MATRIX_GOARCH: ${{ matrix.goarch }}
+          SUFFIX: ${{ steps.suffix.outputs.suffix }}
+        with:
+          environment_variables: HCLOUD_TOKEN MATRIX_RUNTIME MATRIX_GOARCH SUFFIX
+          operating_system: freebsd
+          version: '14.2'
+          architecture: ${{ matrix.vm_arch }}
+          run: |
+            set -eu
+            sudo pkg update -q || true
+            if [ "$MATRIX_RUNTIME" = "tofu" ]; then
+              sudo pkg install -y opentofu
+            else
+              sudo pkg install -y terraform
+            fi
+            GOOS=freebsd GOARCH="$MATRIX_GOARCH" sh ./.github/scripts/stage-provider.sh
+            export TF_CLI_CONFIG_FILE="$PWD/dist/dev_overrides.tfrc"
+            cd internal/smoketest
+            "$MATRIX_RUNTIME" init
+            "$MATRIX_RUNTIME" validate
+            set +e
+            "$MATRIX_RUNTIME" apply -auto-approve -var "suffix=$SUFFIX"
+            rc=$?
+            "$MATRIX_RUNTIME" destroy -auto-approve -var "suffix=$SUFFIX" || true
+            exit "$rc"
+
   acctest:
     name: Acceptance (real hcloud)
     runs-on: ubuntu-latest
-    # Don't burn money on real-Hetzner runs when the Go build is broken.
-    needs: [test, lint]
-    # Runs on main pushes and on every v* tag (the tag run gates the
-    # release job below). PR runs are excluded so the cycle stays fast
-    # and the cost stays predictable; cut a manual run via
+    needs: [test, lint, smoke-native, smoke-freebsd]
+    # Push-to-main and v* tags only. PR runs are excluded so the cycle
+    # stays fast and the cost stays predictable; cut a manual run via
     # workflow_dispatch when a PR genuinely needs it.
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     concurrency:
-      # Single shared Hetzner sandbox — never run two acctest jobs at once.
-      group: acctest
+      # Single shared Hetzner sandbox: never run two acctest jobs at
+      # once, never overlap with the daily sweep. Smoke partitions by
+      # name prefix (tfacc-smoke-*) so it doesn't need this group.
+      group: hcloud-sandbox
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: "1.25.x"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       - run: sudo apt-get update && sudo apt-get install -y openssh-client
-      - name: Install OpenTofu
-        env:
-          TOFU_VERSION: "1.11.6"
-        run: |
-          BASE="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
-          ARCHIVE="tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL "${BASE}/${ARCHIVE}" -o "${ARCHIVE}"
-          curl -sSfL "${BASE}/tofu_${TOFU_VERSION}_SHA256SUMS" -o checksums.txt
-          grep " ${ARCHIVE}\$" checksums.txt | sha256sum -c -
-          tar -xzf "${ARCHIVE}" -C /usr/local/bin tofu
-          rm "${ARCHIVE}" checksums.txt
+      - uses: ./.github/actions/setup-tf-cli
+        with:
+          runtime: tofu
       - run: make testacc
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          TF_ACC_TERRAFORM_PATH: /usr/local/bin/tofu
-          # The HCL refers to the provider by its short name
-          # ("hcloudgroup"); plugin-testing resolves that against
-          # TF_ACC_PROVIDER_HOST. OpenTofu rejects the legacy "-"
-          # namespace under registry.terraform.io, so point at the
-          # OpenTofu registry to match the binary we just installed.
+          # OpenTofu rejects the legacy "-" namespace under
+          # registry.terraform.io; point plugin-testing at the OpenTofu
+          # registry to match the tofu binary.
+          TF_ACC_TERRAFORM_PATH: tofu
           TF_ACC_PROVIDER_HOST: registry.opentofu.org
 
   release:
     name: Release
     runs-on: ubuntu-latest
-    # Tag-only. The needs chain enforces "no release without acceptance
-    # beforehand" — if any of test/lint/acctest fails or is skipped, the
-    # release does not run.
-    needs: [test, lint, acctest]
+    # Tag-only. needs: chain enforces "no release without smoke +
+    # acceptance"; any failure or skip upstream stops the release.
+    needs: [test, lint, smoke-native, smoke-freebsd, acctest]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -99,7 +250,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: "1.25.x"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       - name: Install syft (for goreleaser SBOM generation)
         env:
@@ -118,6 +269,10 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
+      # Rebuilds independently from the build job. Reproducibility
+      # (mod_timestamp + -trimpath + deterministic ldflags) makes the
+      # published binaries bit-identical to what smoke validated, modulo
+      # the snapshot-vs-tag main.version string.
       - uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
         with:
           version: "~> v2"
