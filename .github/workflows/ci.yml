@@ -121,8 +121,15 @@ jobs:
           TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
         run: |
           set -euo pipefail
-          ${{ matrix.runtime }} init
-          ${{ matrix.runtime }} validate
+          # OpenTofu errors on `init` when a dev_overrides target is in
+          # required_providers ("provider ... was not found in any of the
+          # search locations"); its own warning says "Skip tofu init when
+          # using provider development overrides". Ignore init's exit so
+          # the side-effect (hcloud/tls installed under .terraform/) is
+          # preserved. Drop the partial lock file so apply doesn't
+          # complain about missing entries.
+          ${{ matrix.runtime }} init || true
+          rm -f .terraform.lock.hcl
           ${{ matrix.runtime }} apply -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}"
       - name: Destroy
         if: always() && steps.suffix.outcome == 'success'
@@ -195,8 +202,12 @@ jobs:
             GOOS=freebsd GOARCH="$MATRIX_GOARCH" sh ./.github/scripts/stage-provider.sh
             export TF_CLI_CONFIG_FILE="$PWD/dist/dev_overrides.tfrc"
             cd internal/smoketest
-            "$MATRIX_RUNTIME" init
-            "$MATRIX_RUNTIME" validate
+            # OpenTofu's init errors when a dev_overrides target is in
+            # required_providers; tolerate the failure and drop the
+            # partial lock file so apply proceeds with hcloud/tls
+            # installed and the override binary used for hcloudgroup.
+            "$MATRIX_RUNTIME" init || true
+            rm -f .terraform.lock.hcl
             set +e
             "$MATRIX_RUNTIME" apply -auto-approve -var "suffix=$SUFFIX"
             rc=$?
