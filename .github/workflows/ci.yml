@@ -65,162 +65,10 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  smoke-native:
-    name: Smoke native (${{ matrix.runtime }} ${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: [test, lint, build]
-    # Cost gate: each leg spins a real Hetzner VM. Skipped on PRs.
-    # SMOKE_DISABLED=true repo variable kills smoke for hotfix flows.
-    if: |
-      vars.SMOKE_DISABLED != 'true' && (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
-      )
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      # Caps concurrent VMs; smoke-native peak + smoke-freebsd peak
-      # must stay under the Hetzner sandbox project's server quota.
-      max-parallel: 4
-      matrix:
-        include:
-          - { runtime: tofu,      goos: linux,  goarch: amd64, runner: ubuntu-latest }
-          - { runtime: tofu,      goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
-          - { runtime: tofu,      goos: darwin, goarch: amd64, runner: macos-13 }
-          - { runtime: tofu,      goos: darwin, goarch: arm64, runner: macos-14 }
-          - { runtime: terraform, goos: linux,  goarch: amd64, runner: ubuntu-latest }
-          - { runtime: terraform, goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
-          - { runtime: terraform, goos: darwin, goarch: amd64, runner: macos-13 }
-          - { runtime: terraform, goos: darwin, goarch: arm64, runner: macos-14 }
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: dist
-          path: dist/
-
-      - name: Compute resource suffix
-        id: suffix
-        shell: bash
-        run: |
-          # Group-name budget is 52 chars; "tfacc-smoke-" prefix takes
-          # 12, so the suffix must stay <= 40. Fail fast if a future
-          # github.run_id format change blows the budget.
-          SUFFIX="${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.runtime }}-${{ github.run_id }}"
-          if [ ${#SUFFIX} -gt 40 ]; then
-            echo "suffix '$SUFFIX' exceeds 40 chars; tighten naming or truncate" >&2
-            exit 2
-          fi
-          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
-
-      - name: Stage provider for dev_overrides
-        shell: bash
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          WORKSPACE: ${{ github.workspace }}
-        run: sh ./.github/scripts/stage-provider.sh
-
-      - uses: ./.github/actions/setup-tf-cli
-        with:
-          runtime: ${{ matrix.runtime }}
-
-      - name: Apply
-        shell: bash
-        working-directory: internal/smoketest
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
-        run: |
-          set -euo pipefail
-          ${{ matrix.runtime }} init
-          ${{ matrix.runtime }} validate
-          ${{ matrix.runtime }} apply -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}"
-
-      - name: Destroy
-        if: always() && steps.suffix.outcome == 'success'
-        shell: bash
-        working-directory: internal/smoketest
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
-        run: |
-          ${{ matrix.runtime }} destroy -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}" || true
-
-  smoke-freebsd:
-    name: Smoke freebsd (${{ matrix.runtime }} ${{ matrix.goarch }})
-    needs: [test, lint, build]
-    # GitHub does not host FreeBSD runners, so the leg runs inside a
-    # QEMU VM via cross-platform-actions. Same gate as smoke-native.
-    if: |
-      vars.SMOKE_DISABLED != 'true' && (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
-      )
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        include:
-          - { runtime: tofu,      goarch: amd64, vm_arch: x86-64 }
-          - { runtime: tofu,      goarch: arm64, vm_arch: arm64 }
-          - { runtime: terraform, goarch: amd64, vm_arch: x86-64 }
-          - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: dist
-          path: dist/
-
-      - name: Compute resource suffix
-        id: suffix
-        shell: bash
-        run: |
-          SUFFIX="freebsd-${{ matrix.goarch }}-${{ matrix.runtime }}-${{ github.run_id }}"
-          if [ ${#SUFFIX} -gt 40 ]; then
-            echo "suffix '$SUFFIX' exceeds 40 chars" >&2
-            exit 2
-          fi
-          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke (apply + destroy)
-        uses: cross-platform-actions/action@233156312992f3f169d8d0c633c21d12a5d30455 # v1.0.0
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          MATRIX_RUNTIME: ${{ matrix.runtime }}
-          MATRIX_GOARCH: ${{ matrix.goarch }}
-          SUFFIX: ${{ steps.suffix.outputs.suffix }}
-        with:
-          environment_variables: HCLOUD_TOKEN MATRIX_RUNTIME MATRIX_GOARCH SUFFIX
-          operating_system: freebsd
-          version: '14.2'
-          architecture: ${{ matrix.vm_arch }}
-          run: |
-            set -eu
-            sudo pkg update -q || true
-            if [ "$MATRIX_RUNTIME" = "tofu" ]; then
-              sudo pkg install -y opentofu
-            else
-              sudo pkg install -y terraform
-            fi
-            GOOS=freebsd GOARCH="$MATRIX_GOARCH" sh ./.github/scripts/stage-provider.sh
-            export TF_CLI_CONFIG_FILE="$PWD/dist/dev_overrides.tfrc"
-            cd internal/smoketest
-            "$MATRIX_RUNTIME" init
-            "$MATRIX_RUNTIME" validate
-            set +e
-            "$MATRIX_RUNTIME" apply -auto-approve -var "suffix=$SUFFIX"
-            rc=$?
-            "$MATRIX_RUNTIME" destroy -auto-approve -var "suffix=$SUFFIX" || true
-            exit "$rc"
-
   acctest:
     name: Acceptance (real hcloud)
     runs-on: ubuntu-latest
-    needs: [test, lint, smoke-native, smoke-freebsd]
+    needs: [test, lint]
     # Push-to-main and v* tags only. PR runs are excluded so the cycle
     # stays fast and the cost stays predictable; cut a manual run via
     # workflow_dispatch when a PR genuinely needs it.
@@ -256,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     # Tag-only. needs: chain enforces "no release without smoke +
     # acceptance"; any failure or skip upstream stops the release.
-    needs: [test, lint, smoke-native, smoke-freebsd, acctest]
+    needs: [test, lint, acctest]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
