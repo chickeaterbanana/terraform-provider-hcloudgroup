@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions (questions & ideas)
+    url: https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/discussions
+    about: Ask questions, share ideas, or show what you built.
+  - name: Security vulnerability
+    url: https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/security/advisories/new
+    about: Report a security vulnerability privately.

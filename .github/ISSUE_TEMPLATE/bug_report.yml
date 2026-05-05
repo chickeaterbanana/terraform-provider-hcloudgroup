@@ -1,0 +1,59 @@
+name: Bug Report
+description: Something is not working as expected.
+labels: [bug]
+body:
+  - type: input
+    id: provider_version
+    attributes:
+      label: Provider version
+      placeholder: "0.x.y"
+    validations:
+      required: true
+
+  - type: input
+    id: terraform_version
+    attributes:
+      label: Terraform / OpenTofu version
+      placeholder: "Terraform 1.x.y or OpenTofu 1.x.y"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: HCL configuration (sanitized)
+      description: Minimal reproduction — remove any sensitive values.
+      render: hcl
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        terraform init
+        terraform apply
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output (sanitized)
+      description: Run with `TF_LOG=DEBUG` and paste the relevant section.
+      render: text

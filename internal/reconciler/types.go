@@ -1,5 +1,6 @@
 // Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
 // SPDX-License-Identifier: MPL-2.0
+
 // Package reconciler owns the per-slot lifecycle and the multi-phase
 // group orchestration. It is the only package that holds simultaneous
 // references to the hcloud client, the action runner, and the user_data

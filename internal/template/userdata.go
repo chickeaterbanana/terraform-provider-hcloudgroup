@@ -1,5 +1,6 @@
 // Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
 // SPDX-License-Identifier: MPL-2.0
+
 // Package template renders the user_data_template for a slot. The surface
 // is intentionally narrow: stdlib text/template only, no third-party func
 // maps. Spec section 9.

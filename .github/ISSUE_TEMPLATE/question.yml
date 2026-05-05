@@ -1,0 +1,8 @@
+name: Question
+description: Not a bug or feature — just a question? Start a Discussion instead.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use [Discussions](https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/discussions) for questions.
+        Issues are reserved for bug reports and feature requests.
