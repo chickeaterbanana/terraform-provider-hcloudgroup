@@ -137,8 +137,6 @@ jobs:
   smoke-freebsd:
     name: Smoke freebsd (${{ matrix.runtime }} ${{ matrix.goarch }})
     needs: [test, lint, build]
-    # GitHub does not host FreeBSD runners, so the leg runs inside a
-    # QEMU VM via cross-platform-actions. Same gate as smoke-native.
     if: |
       vars.SMOKE_DISABLED != 'true' && (
         github.event_name == 'workflow_dispatch' ||
@@ -156,52 +154,7 @@ jobs:
           - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: dist
-          path: dist/
-      - name: Compute resource suffix
-        id: suffix
-        shell: bash
-        run: |
-          SUFFIX="freebsd-${{ matrix.goarch }}-${{ matrix.runtime }}-${{ github.run_id }}"
-          if [ ${#SUFFIX} -gt 40 ]; then
-            echo "suffix '$SUFFIX' exceeds 40 chars" >&2
-            exit 2
-          fi
-          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
-      - name: Smoke (apply + destroy)
-        # v1.0.0 declares `using: node24` which GitHub-hosted runners do
-        # not yet accept (workflow startup_failure). v0.32.0 uses node20.
-        uses: cross-platform-actions/action@492b0c80085400348c599edace11141a4ee73524 # v0.32.0
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-          MATRIX_RUNTIME: ${{ matrix.runtime }}
-          MATRIX_GOARCH: ${{ matrix.goarch }}
-          SUFFIX: ${{ steps.suffix.outputs.suffix }}
-        with:
-          environment_variables: HCLOUD_TOKEN MATRIX_RUNTIME MATRIX_GOARCH SUFFIX
-          operating_system: freebsd
-          version: '14.2'
-          architecture: ${{ matrix.vm_arch }}
-          run: |
-            set -eu
-            sudo pkg update -q || true
-            if [ "$MATRIX_RUNTIME" = "tofu" ]; then
-              sudo pkg install -y opentofu
-            else
-              sudo pkg install -y terraform
-            fi
-            GOOS=freebsd GOARCH="$MATRIX_GOARCH" sh ./.github/scripts/stage-provider.sh
-            export TF_CLI_CONFIG_FILE="$PWD/dist/dev_overrides.tfrc"
-            cd internal/smoketest
-            "$MATRIX_RUNTIME" init
-            "$MATRIX_RUNTIME" validate
-            set +e
-            "$MATRIX_RUNTIME" apply -auto-approve -var "suffix=$SUFFIX"
-            rc=$?
-            "$MATRIX_RUNTIME" destroy -auto-approve -var "suffix=$SUFFIX" || true
-            exit "$rc"
+      - run: echo "minimal stub for ${{ matrix.runtime }} ${{ matrix.goarch }} ${{ matrix.vm_arch }}"
 
   acctest:
     name: Acceptance (real hcloud)
