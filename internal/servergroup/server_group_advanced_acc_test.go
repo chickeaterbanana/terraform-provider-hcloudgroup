@@ -91,8 +91,8 @@ resource "hcloudgroup_server_group" "test" {
   name        = %q
   replicas    = %d
   image       = %q
-  server_type = "cx23"
-  location    = "fsn1"
+  server_type = %q
+  location    = %q
   network_id  = %d
   ssh_keys    = [%q]
 
@@ -108,7 +108,7 @@ EOT
     delete = "10m"
   }
 }
-`, name, count, image, suite.NetworkID, suite.SSHKeyName,
+`, name, count, image, suite.ServerType, suite.Location, suite.NetworkID, suite.SSHKeyName,
 		fmt.Sprintf(baseUserData, suite.PublicKeyOpenSSH),
 		extras,
 	)
@@ -247,9 +247,9 @@ func TestAccServerGroup_OrphanCleanup(t *testing.T) {
 					// Inject a fake orphan: complete=false, slot=99, gen=99.
 					_, _, err := hc.Server.Create(context.Background(), hcloud.ServerCreateOpts{
 						Name:       fmt.Sprintf("%s-orphan-99-99", groupName),
-						ServerType: &hcloud.ServerType{Name: "cx23"},
+						ServerType: &hcloud.ServerType{Name: suite.ServerType},
 						Image:      &hcloud.Image{Name: "debian-13"},
-						Location:   &hcloud.Location{Name: "fsn1"},
+						Location:   &hcloud.Location{Name: suite.Location},
 						Networks:   []*hcloud.Network{{ID: suite.NetworkID}},
 						SSHKeys:    []*hcloud.SSHKey{{ID: suite.SSHKeyID}},
 						Labels: map[string]string{

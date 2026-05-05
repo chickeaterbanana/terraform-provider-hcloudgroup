@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -20,6 +21,33 @@ import (
 
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 )
+
+// candidateServerTypes lists the two smallest x86 Hetzner Cloud server
+// types in price-ascending order: cpx11 (AMD, 2 vCPU / 2GB) then cx22
+// (Intel, 2 vCPU / 4GB). Smaller types have disproportionately more
+// capacity, so the suite uses these to minimize resource_unavailable
+// failures during jump-host create. The first candidate with capacity
+// becomes the suite's ServerType and is reused for every test resource.
+var candidateServerTypes = []string{"cpx11", "cx22"}
+
+// candidateLocations is the ordered list of Hetzner Cloud locations the
+// suite will iterate when looking for capacity. Any region works — the
+// suite is location-agnostic — so this is just the EU-central trio
+// closest to the project's default sandbox.
+var candidateLocations = []string{"fsn1", "nbg1", "hel1"}
+
+// isCapacityError reports whether err is one of the Hetzner API codes
+// that mean "no capacity for this server type in this location" — the
+// signal to try the next (type, location) combination instead of
+// failing hard.
+func isCapacityError(err error) bool {
+	var hcErr hcloud.Error
+	if !errors.As(err, &hcErr) {
+		return false
+	}
+	return hcErr.Code == hcloud.ErrorCodeResourceUnavailable ||
+		hcErr.Code == hcloud.ErrorCodePlacementError
+}
 
 // Resource-name prefix every acctest uses. The sweeper filters by this
 // prefix, so anything not matching it stays untouched.
@@ -43,6 +71,11 @@ var (
 
 // Suite is the shared per-run fixture set: a Network, an SSH key, and a
 // jump host. Reused across every acctest in one `go test` run.
+//
+// ServerType and Location are discovered at jump-host create time by
+// iterating candidateServerTypes × candidateLocations until one
+// combination has capacity, then reused for every test resource so the
+// whole run sticks to one capacity-confirmed pair.
 type Suite struct {
 	NetworkID        int64
 	NetworkName      string
@@ -54,6 +87,8 @@ type Suite struct {
 	PrivateKeyPath   string
 	JumpServerID     int64
 	JumpPublicIP     string
+	ServerType       string
+	Location         string
 
 	hc *hcloud.Client
 }
@@ -241,25 +276,58 @@ func (s *Suite) ensureJumpHost(ctx context.Context) error {
 		}
 		s.JumpServerID = existing.ID
 		s.JumpPublicIP = existing.PublicNet.IPv4.IP.String()
+		// Adopt the existing server's type/location so test resources
+		// land in the same datacenter (private network reachability +
+		// avoids re-probing capacity for an already-working pair).
+		s.ServerType = existing.ServerType.Name
+		s.Location = existing.Datacenter.Location.Name
 		return nil
 	}
 
-	res, _, err := s.hc.Server.Create(ctx, hcloud.ServerCreateOpts{
-		Name:       jumpName,
-		ServerType: &hcloud.ServerType{Name: "cx23"},
-		Image:      &hcloud.Image{Name: "debian-13"},
-		Location:   &hcloud.Location{Name: "fsn1"},
-		Networks:   []*hcloud.Network{{ID: s.NetworkID}},
-		SSHKeys:    []*hcloud.SSHKey{{ID: s.SSHKeyID}},
-		Labels: map[string]string{
-			fixtureLabelKey:         fixtureLabelValue,
-			TestPrefix + ".io/role": "jump",
-		},
-	})
-	if err != nil {
-		return err
+	// Iterate (server_type × location) until one combination has
+	// capacity. Capacity errors mean "try the next pair"; any other
+	// error fails immediately so we don't mask a real bug as a retry.
+	var (
+		res            *hcloud.ServerCreateResult
+		lastCapErr     error
+		chosenServer   string
+		chosenLocation string
+	)
+	for _, st := range candidateServerTypes {
+		for _, loc := range candidateLocations {
+			r, _, createErr := s.hc.Server.Create(ctx, hcloud.ServerCreateOpts{
+				Name:       jumpName,
+				ServerType: &hcloud.ServerType{Name: st},
+				Image:      &hcloud.Image{Name: "debian-13"},
+				Location:   &hcloud.Location{Name: loc},
+				Networks:   []*hcloud.Network{{ID: s.NetworkID}},
+				SSHKeys:    []*hcloud.SSHKey{{ID: s.SSHKeyID}},
+				Labels: map[string]string{
+					fixtureLabelKey:         fixtureLabelValue,
+					TestPrefix + ".io/role": "jump",
+				},
+			})
+			if createErr == nil {
+				res = &r
+				chosenServer, chosenLocation = st, loc
+				break
+			}
+			if !isCapacityError(createErr) {
+				return createErr
+			}
+			lastCapErr = createErr
+		}
+		if res != nil {
+			break
+		}
+	}
+	if res == nil {
+		return fmt.Errorf("no candidate (server_type, location) had capacity across %v × %v: last capacity error: %w",
+			candidateServerTypes, candidateLocations, lastCapErr)
 	}
 	s.JumpServerID = res.Server.ID
+	s.ServerType = chosenServer
+	s.Location = chosenLocation
 
 	// Wait for create + reachability.
 	if err := s.hc.Action.WaitForFunc(ctx, nil, res.Action); err != nil {
