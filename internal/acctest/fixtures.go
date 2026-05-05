@@ -22,31 +22,46 @@ import (
 	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/hcloudx"
 )
 
-// candidateServerTypes lists the two smallest x86 Hetzner Cloud server
-// types in price-ascending order: cpx11 (AMD, 2 vCPU / 2GB) then cx22
-// (Intel, 2 vCPU / 4GB). Smaller types have disproportionately more
-// capacity, so the suite uses these to minimize resource_unavailable
-// failures during jump-host create. The first candidate with capacity
-// becomes the suite's ServerType and is reused for every test resource.
-var candidateServerTypes = []string{"cpx11", "cx22"}
+// candidateServerTypes lists the two smallest x86 server types stocked
+// in Hetzner's EU datacenters (per `hcloud datacenter list`): cpx22
+// (AMD, 2 vCPU / 4GB) and cx23 (Intel, 2 vCPU / 4GB). cpx11/cpx12 only
+// live in US datacenters; cx22 was phased out. Both candidates are
+// available in every EU location below, so the picker only retries
+// when capacity is transiently exhausted. The first candidate that
+// creates successfully becomes the suite's ServerType and is reused
+// for every test resource.
+var candidateServerTypes = []string{"cpx22", "cx23"}
 
-// candidateLocations is the ordered list of Hetzner Cloud locations the
-// suite will iterate when looking for capacity. Any region works — the
-// suite is location-agnostic — so this is just the EU-central trio
-// closest to the project's default sandbox.
+// candidateLocations is the ordered list of Hetzner Cloud EU
+// locations. All three stock both candidate server types, so any pair
+// can win. The suite is location-agnostic — it just needs one pair
+// with capacity right now.
 var candidateLocations = []string{"fsn1", "nbg1", "hel1"}
 
-// isCapacityError reports whether err is one of the Hetzner API codes
-// that mean "no capacity for this server type in this location" — the
-// signal to try the next (type, location) combination instead of
-// failing hard.
-func isCapacityError(err error) bool {
+// isRetryableCreateError reports whether err signals "this particular
+// (type, location) pair won't work — try the next one." Includes both
+// capacity issues (resource_unavailable, placement_error) and the
+// "unsupported location for server type" case Hetzner returns as
+// invalid_input when a small type is not stocked in a given
+// datacenter. Other errors (bad SSH key, auth, network not found) are
+// constant across candidates and should fail the whole bootstrap on
+// the first hit.
+func isRetryableCreateError(err error) bool {
 	var hcErr hcloud.Error
 	if !errors.As(err, &hcErr) {
 		return false
 	}
-	return hcErr.Code == hcloud.ErrorCodeResourceUnavailable ||
-		hcErr.Code == hcloud.ErrorCodePlacementError
+	switch hcErr.Code {
+	case hcloud.ErrorCodeResourceUnavailable, hcloud.ErrorCodePlacementError:
+		return true
+	case hcloud.ErrorCodeInvalidInput:
+		// Only retry the specific "this combination doesn't exist" case;
+		// other invalid_input errors (bad SSH key id, etc.) are constant.
+		return strings.Contains(hcErr.Message, "unsupported location for server type") ||
+			strings.Contains(hcErr.Message, "server_type")
+	default:
+		return false
+	}
 }
 
 // Resource-name prefix every acctest uses. The sweeper filters by this
@@ -312,7 +327,7 @@ func (s *Suite) ensureJumpHost(ctx context.Context) error {
 				chosenServer, chosenLocation = st, loc
 				break
 			}
-			if !isCapacityError(createErr) {
+			if !isRetryableCreateError(createErr) {
 				return createErr
 			}
 			lastCapErr = createErr
@@ -322,7 +337,7 @@ func (s *Suite) ensureJumpHost(ctx context.Context) error {
 		}
 	}
 	if res == nil {
-		return fmt.Errorf("no candidate (server_type, location) had capacity across %v × %v: last capacity error: %w",
+		return fmt.Errorf("no candidate (server_type, location) was creatable across %v × %v: last error: %w",
 			candidateServerTypes, candidateLocations, lastCapErr)
 	}
 	s.JumpServerID = res.Server.ID
