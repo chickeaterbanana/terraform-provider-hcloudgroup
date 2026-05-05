@@ -46,8 +46,8 @@ resource "hcloudgroup_server_group" "test" {
   name        = %q
   replicas    = %d
   image       = %q
-  server_type = "cx23"
-  location    = "fsn1"
+  server_type = %q
+  location    = %q
   network_id  = %d
   ssh_keys    = [%q]
 
@@ -63,7 +63,7 @@ EOT
     delete = "10m"
   }
 }
-`, name, count, image, suite.NetworkID, suite.SSHKeyName,
+`, name, count, image, suite.ServerType, suite.Location, suite.NetworkID, suite.SSHKeyName,
 		fmt.Sprintf(baseUserData, suite.PublicKeyOpenSSH),
 		extras,
 	)
@@ -236,14 +236,14 @@ resource "hcloudgroup_server_group" "test" {
   name        = %q
   replicas    = 1
   image       = "debian-13"
-  server_type = "cx23"
-  location    = "fsn1"
+  server_type = %q
+  location    = %q
   network_id  = %d
   ssh_keys    = [%q]
 
   user_data_template = "{{ .DoesNotClose"
 }
-`, groupName, suite.NetworkID, suite.SSHKeyName)
+`, groupName, suite.ServerType, suite.Location, suite.NetworkID, suite.SSHKeyName)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProviderFactories(),
