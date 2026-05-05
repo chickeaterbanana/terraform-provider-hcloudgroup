@@ -280,7 +280,7 @@ func (s *Suite) ensureJumpHost(ctx context.Context) error {
 		// land in the same datacenter (private network reachability +
 		// avoids re-probing capacity for an already-working pair).
 		s.ServerType = existing.ServerType.Name
-		s.Location = existing.Datacenter.Location.Name
+		s.Location = existing.Location.Name
 		return nil
 	}
 
