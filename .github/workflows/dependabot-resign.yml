@@ -1,43 +1,20 @@
-name: Dependabot re-sign and auto-merge
+name: Dependabot auto-merge
 
-on: pull_request_target
+on: pull_request
 
 permissions:
-  contents: write
   pull-requests: write
 
 jobs:
-  resign-and-merge:
+  auto-merge:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR branch (full history)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Import release GPG key
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.PASSPHRASE }}
-          git_user_signingkey: true
-          git_commit_gpgsign: true
-          git_committer_name: "leifwind release bot"
-          git_committer_email: "claude@bjarne-bruhn.com"
-
-      - name: Re-sign Dependabot tip (preserve author, GPG-sign as committer)
-        # Keeps the original Dependabot author + message; the committer
-        # becomes the GPG identity imported above, making the commit
-        # verified: true so required_signatures is satisfied on merge.
-        run: |
-          git commit --amend --no-edit -S
-          git push --force-with-lease
-
       - name: Enable auto-merge (merge-commit strategy)
+        # Queues a merge-commit merge once all required checks pass.
+        # required_signatures is satisfied by the merge commit, which
+        # GitHub signs via its web-flow key — re-signing the Dependabot
+        # branch tip is not required.
         run: gh pr merge --merge --auto "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
