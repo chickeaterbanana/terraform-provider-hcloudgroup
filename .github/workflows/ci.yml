@@ -75,7 +75,7 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
       )
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       # Caps concurrent VMs; smoke-native peak + smoke-freebsd peak
@@ -83,14 +83,14 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - { runtime: tofu,      goos: linux,  goarch: amd64, runs-on: ubuntu-latest }
-          - { runtime: tofu,      goos: linux,  goarch: arm64, runs-on: ubuntu-24.04-arm }
-          - { runtime: tofu,      goos: darwin, goarch: amd64, runs-on: macos-13 }
-          - { runtime: tofu,      goos: darwin, goarch: arm64, runs-on: macos-14 }
-          - { runtime: terraform, goos: linux,  goarch: amd64, runs-on: ubuntu-latest }
-          - { runtime: terraform, goos: linux,  goarch: arm64, runs-on: ubuntu-24.04-arm }
-          - { runtime: terraform, goos: darwin, goarch: amd64, runs-on: macos-13 }
-          - { runtime: terraform, goos: darwin, goarch: arm64, runs-on: macos-14 }
+          - { runtime: tofu,      goos: linux,  goarch: amd64, runner: ubuntu-latest }
+          - { runtime: tofu,      goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
+          - { runtime: tofu,      goos: darwin, goarch: amd64, runner: macos-13 }
+          - { runtime: tofu,      goos: darwin, goarch: arm64, runner: macos-14 }
+          - { runtime: terraform, goos: linux,  goarch: amd64, runner: ubuntu-latest }
+          - { runtime: terraform, goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
+          - { runtime: terraform, goos: darwin, goarch: amd64, runner: macos-13 }
+          - { runtime: terraform, goos: darwin, goarch: arm64, runner: macos-14 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -179,10 +179,10 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - { runtime: tofu,      goarch: amd64, vm-arch: x86-64 }
-          - { runtime: tofu,      goarch: arm64, vm-arch: arm64 }
-          - { runtime: terraform, goarch: amd64, vm-arch: x86-64 }
-          - { runtime: terraform, goarch: arm64, vm-arch: arm64 }
+          - { runtime: tofu,      goarch: amd64, vm_arch: x86-64 }
+          - { runtime: tofu,      goarch: arm64, vm_arch: arm64 }
+          - { runtime: terraform, goarch: amd64, vm_arch: x86-64 }
+          - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -213,7 +213,7 @@ jobs:
           environment_variables: HCLOUD_TOKEN MATRIX_RUNTIME MATRIX_GOARCH SUFFIX
           operating_system: freebsd
           version: '14.2'
-          architecture: ${{ matrix.vm-arch }}
+          architecture: ${{ matrix.vm_arch }}
           run: |
             set -eu
             sudo pkg update -q || true
