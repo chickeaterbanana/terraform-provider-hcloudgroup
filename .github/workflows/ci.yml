@@ -63,9 +63,19 @@ jobs:
           go-version: "1.25.x"
           cache: true
       - run: sudo apt-get update && sudo apt-get install -y openssh-client
+      - name: Install OpenTofu
+        env:
+          TOFU_VERSION: "1.11.6"
+        run: |
+          curl -sSfL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz" -o tofu.tar.gz
+          curl -sSfL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_SHA256SUMS" -o checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf tofu.tar.gz -C /usr/local/bin tofu
+          rm tofu.tar.gz checksums.txt
       - run: make testacc
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          TF_ACC_TERRAFORM_PATH: /usr/local/bin/tofu
 
   release:
     name: Release
