@@ -34,12 +34,11 @@ linters:
       - path: internal/acctest/.*_test\.go
         linters:
           - errcheck
-
-linters-settings:
-  goheader:
-    template: |-
-      Copyright (c) {{ YEAR }} The terraform-provider-hcloudgroup Authors
-      SPDX-License-Identifier: MPL-2.0
+  settings:
+    goheader:
+      template: |-
+        Copyright (c) {{ YEAR }} The terraform-provider-hcloudgroup Authors
+        SPDX-License-Identifier: MPL-2.0
 
 formatters:
   enable:

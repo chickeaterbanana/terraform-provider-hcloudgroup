@@ -5,6 +5,7 @@
 - Go 1.25.x
 - `golangci-lint` v2.x (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
 - Optional: `tfplugindocs` for regenerating provider documentation
+- Optional (recommended): install [pre-commit](https://pre-commit.com/) and run `pre-commit install` to get a local lint hook that auto-fixes issues before each commit
 
 ## Workflow
 
