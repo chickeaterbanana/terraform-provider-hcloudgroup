@@ -78,6 +78,12 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_ACC_TERRAFORM_PATH: /usr/local/bin/tofu
+          # The HCL refers to the provider by its short name
+          # ("hcloudgroup"); plugin-testing resolves that against
+          # TF_ACC_PROVIDER_HOST. OpenTofu rejects the legacy "-"
+          # namespace under registry.terraform.io, so point at the
+          # OpenTofu registry to match the binary we just installed.
+          TF_ACC_PROVIDER_HOST: registry.opentofu.org
 
   release:
     name: Release
