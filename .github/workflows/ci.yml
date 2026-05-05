@@ -83,6 +83,15 @@ jobs:
         with:
           go-version: "1.25.x"
           cache: true
+      - name: Install syft (for goreleaser SBOM generation)
+        env:
+          SYFT_VERSION: "1.44.0"
+        run: |
+          curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" -o syft.tar.gz
+          curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt" -o checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf syft.tar.gz -C /usr/local/bin syft
+          rm syft.tar.gz checksums.txt
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         id: import_gpg
