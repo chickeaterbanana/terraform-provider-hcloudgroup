@@ -1,7 +1,36 @@
-# hcloud Server Group Provider — Refinement Document
+# hcloud Server Group Provider
 
-> **Status:** Draft for handoff to Claude Code.
-> **Scope:** Independent greenfield project. Pure tofu provider, no daemon, no central state store.
+[![CI](https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/actions/workflows/ci.yml/badge.svg)](https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/actions/workflows/ci.yml)
+[![Terraform Registry](https://img.shields.io/badge/registry-chickeaterbanana%2Fhcloudgroup-623CE4)](https://registry.terraform.io/providers/chickeaterbanana/hcloudgroup/latest)
+
+> **Status:** v0.1.0 published on the Terraform Registry. Acceptance tests run against a real Hetzner sandbox on every release.
+> **Scope:** Independent greenfield project. Pure tofu/terraform provider, no daemon, no central state store.
+
+---
+
+## 0. Installation
+
+The provider is published on `registry.terraform.io`; `terraform init` resolves it automatically. OpenTofu support (`tofu init` against `registry.opentofu.org`) is a follow-up.
+
+```hcl
+terraform {
+  required_providers {
+    hcloudgroup = {
+      source  = "chickeaterbanana/hcloudgroup"
+      version = "~> 0.1"
+    }
+  }
+}
+
+provider "hcloudgroup" {
+  # Reads HCLOUD_TOKEN from the environment if omitted.
+  # token = var.hcloud_token
+}
+```
+
+Releases are GPG-signed (RSA-4096, fingerprint `E8CCF925766517EC1E99A9F9444DC818EC36F233`); the registry verifies the signature on ingestion. Linux, macOS, and FreeBSD binaries are built for `amd64`, `arm`, and `arm64` (except `darwin/arm`). Windows is not supported in v1 — the action runner uses `/bin/sh` and Unix process-group signals.
+
+See [§7.1](#71-hcl-example) for a fully-worked resource example.
 
 ---
 
