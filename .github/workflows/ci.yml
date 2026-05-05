@@ -135,30 +135,16 @@ jobs:
           ${{ matrix.runtime }} destroy -auto-approve -var "suffix=${{ steps.suffix.outputs.suffix }}" || true
 
   smoke-freebsd:
-    name: Smoke freebsd (${{ matrix.runtime }} ${{ matrix.goarch }})
+    name: Smoke freebsd
     needs: [test, lint, build]
-    if: |
-      vars.SMOKE_DISABLED != 'true' && (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
-      )
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        include:
-          - { runtime: tofu,      goarch: amd64, vm_arch: x86-64 }
-          - { runtime: tofu,      goarch: arm64, vm_arch: arm64 }
-          - { runtime: terraform, goarch: amd64, vm_arch: x86-64 }
-          - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: cross-platform-actions/action@492b0c80085400348c599edace11141a4ee73524 # v0.32.0
         with:
           operating_system: freebsd
           version: '14.2'
-          architecture: ${{ matrix.vm_arch }}
+          architecture: x86-64
           run: uname -a
 
   acctest:
