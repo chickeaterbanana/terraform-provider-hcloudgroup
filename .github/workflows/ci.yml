@@ -113,22 +113,6 @@ jobs:
           fi
           echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
 
-      # Cache the registry providers (hetznercloud/hcloud, hashicorp/tls)
-      # across runs and across legs so the matrix doesn't re-download
-      # them every push. Hashes the fixture so a provider bump
-      # invalidates the cache.
-      - name: Plugin cache
-        shell: bash
-        run: |
-          mkdir -p "$HOME/.terraform.d/plugin-cache"
-          echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache" >> "$GITHUB_ENV"
-      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ~/.terraform.d/plugin-cache
-          key: tf-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/smoketest/main.tf') }}
-          restore-keys: |
-            tf-plugins-${{ runner.os }}-${{ runner.arch }}-
-
       - name: Stage provider for dev_overrides
         shell: bash
         env:
