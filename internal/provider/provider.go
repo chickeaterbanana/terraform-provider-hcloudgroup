@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package provider declares the hcloudgroup terraform/opentofu provider:
 // schema, configuration, and resource registration.
 package provider

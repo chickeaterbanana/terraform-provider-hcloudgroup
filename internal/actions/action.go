@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package actions implements the lifecycle action runner: null and command
 // types, the slot-context env var assembler, the clean-env shell exec, and
 // the readiness probe loop.

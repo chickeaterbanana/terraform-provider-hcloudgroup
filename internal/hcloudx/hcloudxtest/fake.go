@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package hcloudxtest provides an in-memory hcloudx.Client implementation
 // for unit tests of any package that talks to hcloud through the
 // reconciler/CRUD layer. Tests run sequentially; the fake is not safe for

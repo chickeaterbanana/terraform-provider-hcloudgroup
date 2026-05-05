@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/actions/workflows/ci.yml/badge.svg)](https://github.com/chickeaterbanana/terraform-provider-hcloudgroup/actions/workflows/ci.yml)
 [![Terraform Registry](https://img.shields.io/badge/registry-chickeaterbanana%2Fhcloudgroup-623CE4)](https://registry.terraform.io/providers/chickeaterbanana/hcloudgroup/latest)
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen.svg)](./LICENSE)
 
 > **Status:** v0.1.0 published on the Terraform Registry. Acceptance tests run against a real Hetzner sandbox on every release.
 > **Scope:** Independent greenfield project. Pure tofu/terraform provider, no daemon, no central state store.
@@ -628,3 +629,9 @@ None blocking. Default timeouts (`create=60m`, `update=90m`, `delete=30m` per th
 - **Canonical server (for a slot)**: the highest-generation server for that slot with `hcloudgroup.io/complete=true`. The one `Read` surfaces.
 - **Incomplete server**: a server with `hcloudgroup.io/complete=false` — created but post-actions did not finish. Garbage-collected by pre-flight cleanup on the next Update.
 - **Reserved namespaces**: `hcloudgroup.io/` for server labels, `HCLOUDGROUP_` for command env vars. Operator inputs in the matching prefix are rejected at plan time.
+
+---
+
+## License
+
+[Mozilla Public License v2.0](./LICENSE). File-scoped weak copyleft: vendor freely, but modifications to MPL-licensed source files in this repo stay MPL.

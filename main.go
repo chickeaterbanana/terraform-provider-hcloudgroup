@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // terraform-provider-hcloudgroup is the provider binary entry point. It
 // hands off to the framework's providerserver, which speaks the
 // terraform-plugin protocol on stdin/stdout. The Address must match the
