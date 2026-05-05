@@ -24,6 +24,8 @@ linters:
     # The reconciler's cancel propagation matters across every retry
     # loop and goroutine.
     - contextcheck
+    # License: enforces the MPL-2.0 SPDX header on every Go source file.
+    - goheader
   exclusions:
     rules:
       # Acceptance fixtures (internal/acctest) legitimately ignore some
@@ -32,6 +34,12 @@ linters:
       - path: internal/acctest/.*_test\.go
         linters:
           - errcheck
+
+linters-settings:
+  goheader:
+    template: |-
+      Copyright (c) {{ YEAR }} The terraform-provider-hcloudgroup Authors
+      SPDX-License-Identifier: MPL-2.0
 
 formatters:
   enable:
