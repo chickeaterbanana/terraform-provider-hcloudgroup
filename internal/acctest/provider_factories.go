@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package acctest holds the shared scaffolding for acceptance tests
 // against real Hetzner Cloud: the provider factory map, the per-suite
 // fixtures (Network, SSH key, jump host), and the global sweepers.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package hcloudx wraps the Hetzner Cloud SDK with provider-specific
 // helpers: label-based discovery, action waiting, read-modify-write of the
 // labels map, and retry classification.

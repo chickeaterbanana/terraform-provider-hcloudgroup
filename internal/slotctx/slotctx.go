@@ -1,3 +1,5 @@
+// Copyright (c) 2026 The terraform-provider-hcloudgroup Authors
+// SPDX-License-Identifier: MPL-2.0
 // Package slotctx defines the per-slot context shared by the actions runner,
 // the user_data template renderer, and the reconciler. Living in its own
 // package breaks an otherwise-circular import graph between those three.
