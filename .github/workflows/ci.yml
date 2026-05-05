@@ -154,7 +154,12 @@ jobs:
           - { runtime: terraform, goarch: arm64, vm_arch: arm64 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - run: echo "minimal stub for ${{ matrix.runtime }} ${{ matrix.goarch }} ${{ matrix.vm_arch }}"
+      - uses: cross-platform-actions/action@492b0c80085400348c599edace11141a4ee73524 # v0.32.0
+        with:
+          operating_system: freebsd
+          version: '14.2'
+          architecture: ${{ matrix.vm_arch }}
+          run: uname -a
 
   acctest:
     name: Acceptance (real hcloud)
