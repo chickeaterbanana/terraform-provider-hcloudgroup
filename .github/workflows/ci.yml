@@ -113,7 +113,7 @@ jobs:
       - uses: ./.github/actions/setup-tf-cli
         with:
           runtime: ${{ matrix.runtime }}
-      - name: Warmup init (install hcloud + tls without hcloudgroup)
+      - name: Warmup init (install hcloud without hcloudgroup)
         shell: bash
         env:
           TF_CLI_CONFIG_FILE: ${{ github.workspace }}/dist/dev_overrides.tfrc
@@ -123,15 +123,13 @@ jobs:
           # found in any of the search locations"). Run init in a
           # separate dir whose required_providers list omits
           # hcloudgroup; init succeeds, writes .terraform/ and
-          # .terraform.lock.hcl with hcloud + tls populated. We then
-          # copy those into the smoke fixture so apply doesn't have to
-          # init.
+          # .terraform.lock.hcl with hcloud populated. We then copy
+          # those into the smoke fixture so apply doesn't have to init.
           mkdir -p "$RUNNER_TEMP/init-warmup"
           cat > "$RUNNER_TEMP/init-warmup/main.tf" <<'EOF'
           terraform {
             required_providers {
               hcloud = { source = "hetznercloud/hcloud", version = "~> 1.48" }
-              tls    = { source = "hashicorp/tls",       version = "~> 4.0" }
             }
           }
           EOF
@@ -227,7 +225,6 @@ jobs:
             terraform {
               required_providers {
                 hcloud = { source = "hetznercloud/hcloud", version = "~> 1.48" }
-                tls    = { source = "hashicorp/tls",       version = "~> 4.0" }
               }
             }
             EOF
