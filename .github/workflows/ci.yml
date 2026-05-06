@@ -261,14 +261,19 @@ jobs:
       - uses: ./.github/actions/setup-tf-cli
         with:
           runtime: tofu
-      - run: make testacc
+      - shell: bash
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           # OpenTofu rejects the legacy "-" namespace under
           # registry.terraform.io; point plugin-testing at the OpenTofu
           # registry to match the tofu binary.
-          TF_ACC_TERRAFORM_PATH: tofu
           TF_ACC_PROVIDER_HOST: registry.opentofu.org
+        # terraform-plugin-testing v1.16+ rejects a relative
+        # TF_ACC_TERRAFORM_PATH ("expected ExactBinPath to be an
+        # absolute path"); resolve via `command -v` at run time.
+        run: |
+          export TF_ACC_TERRAFORM_PATH=$(command -v tofu)
+          make testacc
 
   release:
     name: Release
