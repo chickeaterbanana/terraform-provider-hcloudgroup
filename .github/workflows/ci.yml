@@ -81,11 +81,9 @@ jobs:
         include:
           - { runtime: tofu,      goos: linux,  goarch: amd64, runner: ubuntu-latest }
           - { runtime: tofu,      goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
-          - { runtime: tofu,      goos: darwin, goarch: amd64, runner: macos-13 }
           - { runtime: tofu,      goos: darwin, goarch: arm64, runner: macos-14 }
           - { runtime: terraform, goos: linux,  goarch: amd64, runner: ubuntu-latest }
           - { runtime: terraform, goos: linux,  goarch: arm64, runner: ubuntu-24.04-arm }
-          - { runtime: terraform, goos: darwin, goarch: amd64, runner: macos-13 }
           - { runtime: terraform, goos: darwin, goarch: arm64, runner: macos-14 }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
