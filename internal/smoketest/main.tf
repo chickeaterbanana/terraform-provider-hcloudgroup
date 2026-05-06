@@ -6,7 +6,6 @@ terraform {
   required_providers {
     hcloud      = { source = "hetznercloud/hcloud", version = "~> 1.48" }
     hcloudgroup = { source = "chickeaterbanana/hcloudgroup" }
-    tls         = { source = "hashicorp/tls", version = "~> 4.0" }
   }
 }
 
@@ -34,16 +33,6 @@ resource "hcloud_network_subnet" "smoke" {
   ip_range     = "10.97.1.0/24"
 }
 
-resource "tls_private_key" "smoke" {
-  algorithm = "ED25519"
-}
-
-resource "hcloud_ssh_key" "smoke" {
-  name       = "tfacc-smoke-key-${var.suffix}"
-  public_key = trimspace(tls_private_key.smoke.public_key_openssh)
-  labels     = { "tfacc.io/fixture" = "shared" }
-}
-
 resource "hcloudgroup_server_group" "smoke" {
   name        = "tfacc-smoke-${var.suffix}"
   replicas    = 1
@@ -51,7 +40,6 @@ resource "hcloudgroup_server_group" "smoke" {
   server_type = "cpx22"
   location    = "fsn1"
   network_id  = hcloud_network.smoke.id
-  ssh_keys    = [hcloud_ssh_key.smoke.name]
   labels      = { "tfacc.io/fixture" = "shared" }
 
   # Server attaches to the network; subnet must exist first or hcloud
