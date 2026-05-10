@@ -2,7 +2,7 @@
 
 All notable changes to this provider are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — Unreleased
+## [0.4.0] — 2026-05-10
 
 ### Changed
 
@@ -30,6 +30,10 @@ All notable changes to this provider are documented here. The format follows [Ke
 - Existing acceptance tests for hook ordering have been split into `_CreateFirst` and `_DestroyFirst` siblings; CI exercises both.
 - Smoke runs against the new default (`create_before_destroy`); `destroy_before_create` is exercised by the acceptance suite.
 - README §6.2 documents the new ordering, the dual-`complete=true` window, crash recovery, and quota / stateful-cluster guidance.
+
+## [0.2.0] — 2026-04 and [0.3.0] — 2026-05
+
+CI / smoke / acceptance plumbing only — no user-visible provider behavior change. See `git log v0.1.0..v0.3.0` for the full set of release-engineering fixes (acctest provider host, candidate server-types, opentofu pre-install, smoke fixture iterations, etc.).
 
 ## [0.1.0] — 2026-04
 
