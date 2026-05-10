@@ -98,6 +98,21 @@ func (r *ServerGroupResource) Read(ctx context.Context, req resource.ReadRequest
 	resp.Diagnostics.Append(sd...)
 	prior.Slots = slotsVal
 
+	// Normalize ReplaceMethod to the schema default when state never had
+	// one set. Two paths land here with a null value:
+	//   1. Post-import: ImportState only seeds name/id/replicas; the
+	//      attribute is null until the framework's auto-Read populates it.
+	//      Without this, ImportStateVerify diffs `replace_method` between
+	//      the imported state (null) and a fresh Read on the same config
+	//      (default-populated), and acctest fails.
+	//   2. v0.1.x state upgrade: pre-attribute state has no value; the
+	//      first Read after upgrade must set it so the next plan doesn't
+	//      see a phantom diff. Documented silent-switch tradeoff in the
+	//      v0.4.0 CHANGELOG / README §6.2.
+	if prior.ReplaceMethod.IsNull() || prior.ReplaceMethod.IsUnknown() {
+		prior.ReplaceMethod = types.StringValue(reconciler.ReplaceMethodCreateBeforeDestroy)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &prior)...)
 }
 

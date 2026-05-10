@@ -2,6 +2,12 @@
 
 All notable changes to this provider are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-05-10
+
+### Fixed
+
+- `Read` now normalizes a null `replace_method` to the schema default (`create_before_destroy`) before writing state back. Without this, `terraform import` left the attribute null in state (ImportState only seeds name/id/replicas), and the next `ImportStateVerify` / plan diffed against the default-populated value. v0.4.0/v0.4.1 acctest `TestAccServerGroup_Import` failed for exactly this reason. Also covers the v0.1.x state-upgrade silent-switch path documented in v0.4.0 — first Read after upgrade now eagerly populates the value.
+
 ## [0.4.1] — 2026-05-10
 
 ### Fixed
