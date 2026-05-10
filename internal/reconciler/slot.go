@@ -139,10 +139,16 @@ func (r *runner) innerCreate(ctx context.Context, slotID, generation int) error 
 	// response's PrivateNet may be empty even after a successful create.
 	// A failed re-read here would mean falling back to that empty struct
 	// and writing an empty ip_private into state — silently breaking
-	// templates and probes that read $HCLOUDGROUP_PRIVATE_IP. Retry the
-	// re-read on transient errors and fail the slot loudly if it never
-	// returns a populated server.
-	err = hcloudx.Retry(ctx, func(ctx context.Context) error {
+	// templates and probes that read $HCLOUDGROUP_PRIVATE_IP.
+	//
+	// RetryIncludingNotFound (rather than plain Retry) covers the
+	// eventual-consistency window between CreateServer succeeding and
+	// GetServer(id) becoming visible — Hetzner can return 404 here for
+	// up to a couple of seconds after a successful create. The smoke
+	// matrix (10 concurrent legs × replicas=2 × image-flip rolling
+	// replace) hits this race regularly; production users on slower
+	// regions or under API contention can hit it too.
+	err = hcloudx.RetryIncludingNotFound(ctx, func(ctx context.Context) error {
 		reread, gerr := r.client.GetServer(ctx, srv.ID)
 		if gerr != nil {
 			return gerr

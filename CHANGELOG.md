@@ -2,6 +2,12 @@
 
 All notable changes to this provider are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-05-10
+
+### Fixed
+
+- Post-create `GetServer` now tolerates Hetzner's eventual-consistency window via a new `RetryIncludingNotFound` helper (NotFound retryable for up to 30s). The v0.4.0 smoke matrix exposed this race because rolling-replace (introduced by v0.4.0's image-flip step) calls `server_get_after_create` four times per leg under heavy concurrent API load; production users on slower regions or under API contention can hit it too. Plain `Retry` semantics are unchanged — destroy / delete-confirmation paths still treat NotFound as terminal.
+
 ## [0.4.0] — 2026-05-10
 
 ### Changed

@@ -110,3 +110,52 @@ func TestRetry_HonorsContextCancellation(t *testing.T) {
 // would dominate test wall-clock). The deterministic wall-clock cap
 // integration is exercised by retry_integration_test in the reconciler
 // package via an injected fake.
+
+// RetryIncludingNotFound must succeed when a transient NotFound clears
+// — covers the post-CreateServer eventual-consistency window.
+func TestRetryIncludingNotFound_RetriesNotFoundUntilSuccess(t *testing.T) {
+	calls := 0
+	err := hcloudx.RetryIncludingNotFound(context.Background(), func(_ context.Context) error {
+		calls++
+		if calls < 3 {
+			return hcloud.Error{Code: hcloud.ErrorCodeNotFound, Message: "not found yet"}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, calls, "NotFound must be retried until the closure returns nil")
+}
+
+// Plain Retry must STILL terminate immediately on NotFound — the
+// destroy / delete-confirmation paths depend on this.
+func TestRetry_TerminatesImmediately_OnNotFound_Unchanged(t *testing.T) {
+	calls := 0
+	start := time.Now()
+	err := hcloudx.Retry(context.Background(), func(_ context.Context) error {
+		calls++
+		return hcloud.Error{Code: hcloud.ErrorCodeNotFound, Message: "permanent"}
+	})
+	require.Error(t, err)
+	require.Equal(t, 1, calls, "plain Retry must keep treating NotFound as terminal")
+	require.Less(t, time.Since(start), 200*time.Millisecond, "no backoff should run for NotFound under Retry")
+}
+
+// Other non-retryable hcloud codes must terminate immediately under
+// RetryIncludingNotFound — the NotFound carve-out is narrow.
+func TestRetryIncludingNotFound_TerminatesImmediately_OnOtherNonRetryable(t *testing.T) {
+	cases := []hcloud.ErrorCode{
+		hcloud.ErrorCodeForbidden,
+		hcloud.ErrorCodeInvalidInput,
+	}
+	for _, code := range cases {
+		t.Run(string(code), func(t *testing.T) {
+			calls := 0
+			err := hcloudx.RetryIncludingNotFound(context.Background(), func(_ context.Context) error {
+				calls++
+				return hcloud.Error{Code: code, Message: "permanent"}
+			})
+			require.Error(t, err)
+			require.Equal(t, 1, calls, "non-NotFound non-retryable errors stay terminal")
+		})
+	}
+}
