@@ -6,6 +6,8 @@
 
 > **Status:** v0.1.0 published on the Terraform Registry. Acceptance tests run against a real Hetzner sandbox on every release.
 > **Scope:** Independent greenfield project. Pure tofu/terraform provider, no daemon, no central state store.
+>
+> **v0.2.0 upgrade note:** the per-slot replace flow now defaults to **create-before-destroy** (`replace_method = "create_before_destroy"`). v0.1.x behaved as if pinned to `destroy_before_create`. Pin destroy-first for fixed-membership quorum systems (etcd, consul, RabbitMQ) and when hcloud vCPU quota is tight. See [§6.2](#62-replacement-method) and [CHANGELOG](./CHANGELOG.md).
 
 ---
 
@@ -236,7 +238,22 @@ REPLACE FLOW (rolling update, generation+1):
 
 **hcloud operations are async.** `Server.Create` and `Server.Delete` return immediately with an `Action` object; the actual work happens asynchronously on Hetzner's side. The provider must poll the Action via `client.Action.WaitForFunc` (in `hcloud-go/v2`) until it reaches a terminal state (`success` or `error`). Server creation typically takes 30-90 seconds; deletion is faster. Timeout the wait at a sensible bound (e.g., 5 min) and treat exhaustion as a slot failure.
 
-Full action sequence on replace:
+Full action sequence on replace depends on `replace_method` (see §6.2):
+
+**`create_before_destroy` (default since v0.2.0):**
+
+1. `before_replace`
+2. `before_create`
+3. hcloud `Server.Create` (with `complete=false` label) + wait Action
+4. `readiness_probe`
+5. `post_create`
+6. label flip `complete=true`
+7. `before_remove`
+8. hcloud `Server.Delete` + wait Action
+9. `post_remove`
+10. `post_replace`
+
+**`destroy_before_create` (v0.1.x behavior):**
 
 1. `before_replace`
 2. `before_remove`
@@ -246,7 +263,7 @@ Full action sequence on replace:
 6. hcloud `Server.Create` (with `complete=false` label) + wait Action
 7. `readiness_probe`
 8. `post_create`
-9. label flip `complete=true` (read-modify-write of the full label map)
+9. label flip `complete=true`
 10. `post_replace`
 
 Cluster-wide concerns go in `before_replace` / `post_replace` (suspend rebalancer, snapshot). Per-server concerns go in the inner hooks.
@@ -271,6 +288,19 @@ The order matters. Removing first means a soon-to-be-deleted slot is never repla
 | **Mixed (replace + scale)** | Pre-flight → remove → replace → create, in that order. |
 
 If a slot fails mid-phase, the provider returns an error to tofu but **preserves progress** for slots that did complete — those updates are written into the response state via `resp.State.Set` before the error is appended. The next apply picks up from the resulting partial state.
+
+### 6.2 Replacement method
+
+The `replace_method` resource attribute selects per-slot replace ordering. Two values; default is `"create_before_destroy"` since v0.2.0 (v0.1.x behaved as if pinned to `"destroy_before_create"`).
+
+- **`create_before_destroy` (default).** For each slot under replace: create the new server at `generation+1`, run the readiness probe and `post_create`, flip its `complete=true` label, THEN delete the old server. The slot transiently has two `complete=true` servers (visible briefly in `hcloud server list`) for at least the duration of the readiness probe. Suits stateless workloads and any cluster member that can join before its predecessor is removed.
+- **`destroy_before_create`.** Delete the old server first, then create the new one. The slot is transiently empty between delete and the new server reaching `ready`. Matches v0.1.x behavior. Required for fixed-membership quorum systems (etcd, consul, RabbitMQ) where two simultaneous members at slot K can break voting math; recommended for any operator running close to their hcloud vCPU/server quota (create-first transiently uses `replicas + 1` servers per replace step).
+
+**Crash recovery does not run hooks.** If an apply crashes between the new server's `complete=true` flip and the old server's delete (create-first), the next apply's preflight reaps the now-superseded old server *without* running `before_remove`/`post_remove` — same contract as today's orphan cleanup. If the crash happens earlier (mid-readiness, before the new server's label flip), preflight reaps the incomplete new server as an orphan and rebinds the slot's tofu state to the surviving old server, then `phaseReplace` rolls the slot again with full hooks. Both windows converge in a single follow-up apply.
+
+**Toggling `replace_method` does not trigger a replace.** It controls *how* a replace happens, not *whether* one is needed; the value is deliberately omitted from the replace hash. Operators can flip the attribute on a steady-state config and see only a no-op plan.
+
+**Upgrading from v0.1.x:** the default switched. Operators running stateful clusters or close to quota should pin `replace_method = "destroy_before_create"` BEFORE running `terraform plan` after the upgrade. Imported v0.1.x resources (via `terraform import`) likewise inherit the new default; pin explicitly to preserve prior ordering.
 
 ---
 

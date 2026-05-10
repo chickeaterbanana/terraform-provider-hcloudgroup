@@ -34,6 +34,7 @@ A group of Hetzner Cloud servers managed as a single rolling-replace unit.
 - `post_remove` (Block, Optional) Post-remove lifecycle hook. (see [below for nested schema](#nestedblock--post_remove))
 - `post_replace` (Block, Optional) Post-replace cluster-level hook. (see [below for nested schema](#nestedblock--post_replace))
 - `readiness_probe` (Block, Optional) Polled command that determines when a freshly-created server is ready. (see [below for nested schema](#nestedblock--readiness_probe))
+- `replace_method` (String) How a slot replace orders create vs delete. "create_before_destroy" (default): bring up the new server, run readiness, then delete the old. "destroy_before_create": delete the old first, then create. Note: the default switched in v0.2.0; v0.1.x behaved as if pinned to destroy-first. Pin destroy-first for fixed-membership quorum systems (etcd, consul, RabbitMQ) and when hcloud vCPU quota is tight (create-first transiently uses replicas+1 servers).
 - `replace_on_change` (Set of String) Names of additional attributes that, when changed, trigger a rolling replace.
 - `ssh_keys` (List of String) Names of pre-existing hcloud SSH keys to authorize on each server.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))

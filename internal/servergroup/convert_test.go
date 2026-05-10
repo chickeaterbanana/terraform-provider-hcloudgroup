@@ -88,6 +88,72 @@ func TestModelToGroup_PopulatesFields(t *testing.T) {
 	require.Nil(t, group.ReadinessProbe, "absent readiness_probe → nil pointer")
 }
 
+// Defense-in-depth: even though the schema sets stringdefault on
+// `replace_method`, Read/Delete paths invoke modelToGroup on prior state
+// (post-import is the canonical case) where the framework does not
+// re-apply Default. Convert layer must coerce empty/null/unknown to the
+// create-first default so a state-derived Group can never carry an
+// invalid empty ReplaceMethod string.
+func TestModelToGroup_ReplaceMethod_DefaultsWhenNullOrEmpty(t *testing.T) {
+	cases := []struct {
+		name     string
+		val      types.String
+		expected string
+	}{
+		{"null", types.StringNull(), reconciler.ReplaceMethodCreateBeforeDestroy},
+		{"unknown", types.StringUnknown(), reconciler.ReplaceMethodCreateBeforeDestroy},
+		{"empty", types.StringValue(""), reconciler.ReplaceMethodCreateBeforeDestroy},
+		{"explicit_create_first", types.StringValue("create_before_destroy"), reconciler.ReplaceMethodCreateBeforeDestroy},
+		{"explicit_destroy_first", types.StringValue("destroy_before_create"), reconciler.ReplaceMethodDestroyBeforeCreate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := resourceModel{
+				Name:          types.StringValue("g"),
+				Count:         types.Int64Value(1),
+				Image:         types.StringValue("debian-13"),
+				ServerType:    types.StringValue("cx22"),
+				Location:      types.StringValue("fsn1"),
+				NetworkID:     types.Int64Value(1),
+				ReplaceMethod: tc.val,
+			}
+			g, _, _, diags := modelToGroup(context.Background(), m)
+			require.False(t, diags.HasError(), "diags: %v", diags.Errors())
+			require.Equal(t, tc.expected, g.ReplaceMethod)
+		})
+	}
+}
+
+// `replace_method` controls *how* a replace happens, not *whether* one
+// is needed. It must not influence the replace hash — toggling between
+// modes on an unchanged config must produce a no-op plan (no rolling
+// replace).
+func TestModelHashInputs_ReplaceMethod_OmittedFromHash(t *testing.T) {
+	base := resourceModel{
+		Name:       types.StringValue("g"),
+		Count:      types.Int64Value(2),
+		Image:      types.StringValue("debian-13"),
+		ServerType: types.StringValue("cx22"),
+		Location:   types.StringValue("fsn1"),
+		NetworkID:  types.Int64Value(1),
+	}
+
+	mCreateFirst := base
+	mCreateFirst.ReplaceMethod = types.StringValue("create_before_destroy")
+	hCreateFirst, _, _, diags := modelHashInputs(context.Background(), mCreateFirst)
+	require.False(t, diags.HasError())
+
+	mDestroyFirst := base
+	mDestroyFirst.ReplaceMethod = types.StringValue("destroy_before_create")
+	hDestroyFirst, _, _, diags := modelHashInputs(context.Background(), mDestroyFirst)
+	require.False(t, diags.HasError())
+
+	fullA, prefixA := hCreateFirst.Hash()
+	fullB, prefixB := hDestroyFirst.Hash()
+	require.Equal(t, fullA, fullB, "toggling replace_method must NOT change the full hash")
+	require.Equal(t, prefixA, prefixB, "toggling replace_method must NOT change the hash prefix")
+}
+
 func TestActionFromBlock_NilBecomesNull(t *testing.T) {
 	a, diags := actionFromBlock(nil, path.Root("before_create"))
 	require.False(t, diags.HasError())

@@ -68,8 +68,9 @@ func TestAccServerGroup_ReplaceOnChange(t *testing.T) {
 // hookOrderingHCL builds a config with all six action hooks set to
 // commands that append a stamped line to logFile on disk. After a
 // rolling replace, parsing the log proves the hooks fired in the spec
-// order.
-func hookOrderingHCL(t *testing.T, name, image string, count int, logFile string) string {
+// order. `replaceMethod` may be empty (uses schema default) or one of
+// the reconciler.ReplaceMethod* values.
+func hookOrderingHCL(t *testing.T, name, image string, count int, logFile, replaceMethod string) string {
 	t.Helper()
 	suite := acctest.Get(t)
 	hook := func(name string) string {
@@ -86,6 +87,10 @@ func hookOrderingHCL(t *testing.T, name, image string, count int, logFile string
 	extras := hook("before_create") + hook("post_create") +
 		hook("before_replace") + hook("post_replace") +
 		hook("before_remove") + hook("post_remove")
+	rmAttr := ""
+	if replaceMethod != "" {
+		rmAttr = fmt.Sprintf("\n  replace_method = %q\n", replaceMethod)
+	}
 	return fmt.Sprintf(`
 resource "hcloudgroup_server_group" "test" {
   name        = %q
@@ -95,7 +100,7 @@ resource "hcloudgroup_server_group" "test" {
   location    = %q
   network_id  = %d
   ssh_keys    = [%q]
-
+%s
   user_data_template = <<EOT
 %s
 EOT
@@ -109,17 +114,18 @@ EOT
   }
 }
 `, name, count, image, suite.ServerType, suite.Location, suite.NetworkID, suite.SSHKeyName,
+		rmAttr,
 		fmt.Sprintf(baseUserData, suite.PublicKeyOpenSSH),
 		extras,
 	)
 }
 
-// TestAccServerGroup_HookOrdering verifies the hook firing order in a
-// replace flow matches the spec (README §6 step list). Uses count=1 so
-// the order is unambiguous.
-func TestAccServerGroup_HookOrdering(t *testing.T) {
+// TestAccServerGroup_HookOrdering_CreateFirst verifies the hook firing
+// order in a replace flow under the v0.2.0+ default (`create_before_destroy`).
+// Uses count=1 so the order is unambiguous.
+func TestAccServerGroup_HookOrdering_CreateFirst(t *testing.T) {
 	acctest.PreCheck(t)
-	groupName := acctest.RandName(t, "hooks")
+	groupName := acctest.RandName(t, "hooks-cf")
 	t.Cleanup(func() { sweepGroup(t, groupName) })
 
 	logFile := filepath.Join(t.TempDir(), "hooks.log")
@@ -130,10 +136,9 @@ func TestAccServerGroup_HookOrdering(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				// Initial create: only before_create + post_create fire.
-				Config: hookOrderingHCL(t, groupName, "debian-13", 1, logFile),
+				Config: hookOrderingHCL(t, groupName, "debian-13", 1, logFile, ""),
 				Check: func(*terraform.State) error {
-					// #nosec G304 -- logFile is a t.TempDir()-derived path,
-					// not operator input.
+					// #nosec G304 -- logFile is a t.TempDir()-derived path.
 					data, err := os.ReadFile(logFile)
 					require.NoError(t, err)
 					lines := nonEmptyLines(string(data))
@@ -142,20 +147,63 @@ func TestAccServerGroup_HookOrdering(t *testing.T) {
 				},
 			},
 			{
-				// Replace: hooks should fire in the spec order.
-				Config: hookOrderingHCL(t, groupName, "ubuntu-24.04", 1, logFile),
+				// Replace under create-first default: bring up new server,
+				// run readiness/post_create, THEN delete the old.
+				Config: hookOrderingHCL(t, groupName, "ubuntu-24.04", 1, logFile, ""),
 				Check: func(*terraform.State) error {
-					// #nosec G304 -- logFile is a t.TempDir()-derived path,
-					// not operator input.
+					// #nosec G304 -- logFile is a t.TempDir()-derived path.
 					data, err := os.ReadFile(logFile)
 					require.NoError(t, err)
 					lines := nonEmptyLines(string(data))
-					// First step's two entries + replace's six = eight total.
+					require.Equal(t, []string{
+						"before_create", "post_create",
+						"before_replace", "before_create", "post_create",
+						"before_remove", "post_remove", "post_replace",
+					}, lines, "create-first hook order: create + readiness + post_create BEFORE delete")
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// TestAccServerGroup_HookOrdering_DestroyFirst pins the legacy v0.1.x
+// ordering with explicit replace_method = "destroy_before_create" and
+// asserts the hooks fire in the destroy-first sequence.
+func TestAccServerGroup_HookOrdering_DestroyFirst(t *testing.T) {
+	acctest.PreCheck(t)
+	groupName := acctest.RandName(t, "hooks-df")
+	t.Cleanup(func() { sweepGroup(t, groupName) })
+
+	logFile := filepath.Join(t.TempDir(), "hooks.log")
+	t.Setenv("HOOK_LOG", logFile)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: acctest.ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: hookOrderingHCL(t, groupName, "debian-13", 1, logFile, "destroy_before_create"),
+				Check: func(*terraform.State) error {
+					// #nosec G304 -- logFile is a t.TempDir()-derived path.
+					data, err := os.ReadFile(logFile)
+					require.NoError(t, err)
+					lines := nonEmptyLines(string(data))
+					require.Equal(t, []string{"before_create", "post_create"}, lines)
+					return nil
+				},
+			},
+			{
+				Config: hookOrderingHCL(t, groupName, "ubuntu-24.04", 1, logFile, "destroy_before_create"),
+				Check: func(*terraform.State) error {
+					// #nosec G304 -- logFile is a t.TempDir()-derived path.
+					data, err := os.ReadFile(logFile)
+					require.NoError(t, err)
+					lines := nonEmptyLines(string(data))
 					require.Equal(t, []string{
 						"before_create", "post_create",
 						"before_replace", "before_remove", "post_remove",
 						"before_create", "post_create", "post_replace",
-					}, lines, "spec §6 hook order on replace")
+					}, lines, "destroy-first hook order matches v0.1.x")
 					return nil
 				},
 			},

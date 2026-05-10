@@ -114,6 +114,53 @@ func TestApply_HookOrderingOnReplace(t *testing.T) {
 	}, log, "hook ordering on replace flow")
 }
 
+func TestApply_HookOrderingOnReplace_CreateFirst(t *testing.T) {
+	c := hcloudxtest.NewFake()
+	g := defaultGroup(1)
+	g.ReplaceMethod = reconciler.ReplaceMethodCreateBeforeDestroy
+
+	c.SeedServer(testGroup, 0, 1, testNetwork)
+	prior := reconciler.State{Slots: []reconciler.SlotState{
+		{SlotID: 0, ServerID: 1, Generation: 1, ReplaceHash: "OLD", PrivateIP: hcloudxtest.SeedPrivateIP(1), Status: reconciler.StatusReady},
+	}}
+
+	var log []string
+	mu := &atomic.Int32{}
+	g.Actions.BeforeCreate = orderingAction{hook: "before_create", log: &log, mu: mu}
+	g.Actions.PostCreate = orderingAction{hook: "post_create", log: &log, mu: mu}
+	g.Actions.BeforeReplace = orderingAction{hook: "before_replace", log: &log, mu: mu}
+	g.Actions.PostReplace = orderingAction{hook: "post_replace", log: &log, mu: mu}
+	g.Actions.BeforeRemove = orderingAction{hook: "before_remove", log: &log, mu: mu}
+	g.Actions.PostRemove = orderingAction{hook: "post_remove", log: &log, mu: mu}
+
+	state, err := reconciler.New(c).Apply(context.Background(), g, prior, nil)
+	require.NoError(t, err)
+
+	// Per plan §6: create-first replace runs in the order
+	// 1. before_replace
+	// 2. before_create
+	// 3. (create)
+	// 4. (readiness probe — none here)
+	// 5. post_create
+	// 6. (label flip)
+	// 7. before_remove
+	// 8. (delete)
+	// 9. post_remove
+	// 10. post_replace
+	require.Equal(t, []string{
+		"before_replace",
+		"before_create",
+		"post_create",
+		"before_remove",
+		"post_remove",
+		"post_replace",
+	}, log, "hook ordering on create-first replace flow")
+	require.Equal(t, 1, c.CreateCalls, "exactly one create")
+	require.Equal(t, 1, c.DeleteCalls, "exactly one delete (the old server)")
+	require.Len(t, state.Slots, 1)
+	require.Equal(t, 2, state.Slots[0].Generation, "new generation after replace")
+}
+
 func TestApply_PureScaleDown_SkipsReplacePhase(t *testing.T) {
 	c := hcloudxtest.NewFake()
 	g := defaultGroup(2)

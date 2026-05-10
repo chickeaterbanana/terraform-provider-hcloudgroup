@@ -198,6 +198,97 @@ func TestApply_ReadinessProbeFailure_PreservesIncompleteServer(t *testing.T) {
 	require.Equal(t, reconciler.StatusFailed, state.Slots[0].Status)
 }
 
+// In create-first mode, before_create fires BEFORE the old server is
+// touched. A failing before_create must abort the replace without
+// destroying the old server (matches the destroy-first contract that
+// before_replace is the firewall against half-replaces).
+func TestApply_CreateFirst_BeforeCreateFailure_DoesNotDeleteOldServer(t *testing.T) {
+	c := hcloudxtest.NewFake()
+	g := defaultGroup(1)
+	g.ReplaceMethod = reconciler.ReplaceMethodCreateBeforeDestroy
+
+	srv := c.SeedServer(testGroup, 0, 1, testNetwork)
+	prior := reconciler.State{Slots: []reconciler.SlotState{{
+		SlotID: 0, ServerID: srv.ID, ServerName: srv.Name,
+		Generation: 1, ReplaceHash: "OLD",
+		PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
+		Status:    reconciler.StatusReady,
+	}}}
+
+	g.Actions.BeforeCreate = failingAction{err: errors.New("hook denied")}
+
+	state, err := reconciler.New(c).Apply(context.Background(), g, prior, nil)
+
+	var slotErr *reconciler.SlotError
+	require.ErrorAs(t, err, &slotErr)
+	require.Equal(t, "before_create", slotErr.Phase)
+	require.Equal(t, 0, c.DeleteCalls, "must not delete old server when before_create failed mid-replace")
+	require.Equal(t, 0, c.CreateCalls, "before_create fires before the hcloud create call")
+
+	// State pre-replace is preserved: prior slot still recorded.
+	require.Len(t, state.Slots, 1)
+	require.Equal(t, srv.ID, state.Slots[0].ServerID)
+}
+
+// In create-first mode, before_remove fires AFTER the new server is
+// healthy. A failing before_remove leaves both servers running and tofu
+// state pointing at the new one — recovery happens via preflight reaping
+// the now-superseded old on the next apply.
+func TestApply_CreateFirst_BeforeRemoveFailure_LeavesBothServers(t *testing.T) {
+	c := hcloudxtest.NewFake()
+	g := defaultGroup(1)
+	g.ReplaceMethod = reconciler.ReplaceMethodCreateBeforeDestroy
+
+	srv := c.SeedServer(testGroup, 0, 1, testNetwork)
+	prior := reconciler.State{Slots: []reconciler.SlotState{{
+		SlotID: 0, ServerID: srv.ID, ServerName: srv.Name,
+		Generation: 1, ReplaceHash: "OLD",
+		PrivateIP: hcloudxtest.SeedPrivateIP(srv.ID),
+		Status:    reconciler.StatusReady,
+	}}}
+
+	g.Actions.BeforeRemove = failingAction{err: errors.New("drain refused")}
+
+	state, err := reconciler.New(c).Apply(context.Background(), g, prior, nil)
+
+	var slotErr *reconciler.SlotError
+	require.ErrorAs(t, err, &slotErr)
+	require.Equal(t, "before_remove", slotErr.Phase)
+	require.Equal(t, 1, c.CreateCalls, "new server was created before the failing before_remove")
+	require.Equal(t, 0, c.DeleteCalls, "delete blocked by failing before_remove")
+	require.Len(t, c.Servers, 2, "both old and new servers exist in hcloud")
+
+	// State already advanced to the new server (innerCreate.Upsert ran).
+	require.Len(t, state.Slots, 1)
+	require.NotEqual(t, srv.ID, state.Slots[0].ServerID, "state advanced to the new server before innerRemove failed")
+	require.Equal(t, 2, state.Slots[0].Generation)
+}
+
+// Edge case from plan §5: create-first replace whose prior was
+// Status=failed with no associated server. Today's destroy-first errors
+// out (errSlotInactive); create-first must succeed because the new
+// server is healthy and stranding it would be worse than skipping a
+// no-op delete of nothing.
+func TestApply_CreateFirst_FailedPriorWithNoServer_SkipsRemove(t *testing.T) {
+	c := hcloudxtest.NewFake()
+	g := defaultGroup(1)
+	g.ReplaceMethod = reconciler.ReplaceMethodCreateBeforeDestroy
+
+	prior := reconciler.State{Slots: []reconciler.SlotState{{
+		SlotID: 0, ServerID: 0, ServerName: "",
+		Generation: 0, ReplaceHash: "OLD",
+		Status: reconciler.StatusFailed, LastError: "previous attempt failed",
+	}}}
+
+	state, err := reconciler.New(c).Apply(context.Background(), g, prior, nil)
+	require.NoError(t, err, "replace must succeed: nothing to delete, healthy new server created")
+	require.Equal(t, 1, c.CreateCalls, "new server is created")
+	require.Equal(t, 0, c.DeleteCalls, "no old server to delete")
+	require.Len(t, state.Slots, 1)
+	require.Equal(t, reconciler.StatusReady, state.Slots[0].Status)
+	require.Equal(t, g.HashFull, state.Slots[0].ReplaceHash)
+}
+
 func TestApply_ProgressFnFiresOnPartialFailure(t *testing.T) {
 	c := hcloudxtest.NewFake()
 	g := defaultGroup(3)

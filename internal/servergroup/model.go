@@ -23,6 +23,7 @@ type resourceModel struct {
 	Labels             types.Map    `tfsdk:"labels"`
 	UserDataTemplate   types.String `tfsdk:"user_data_template"`
 	ReplaceOnChange    types.Set    `tfsdk:"replace_on_change"`
+	ReplaceMethod      types.String `tfsdk:"replace_method"`
 	Slots              types.List   `tfsdk:"slots"`
 	CurrentReplaceHash types.String `tfsdk:"current_replace_hash"`
 
