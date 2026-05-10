@@ -24,32 +24,56 @@ func (r *runner) CreateSlot(ctx context.Context, slotID, generation int) error {
 // RemoveSlot runs the full REMOVE FLOW for a slot. The slot is dropped
 // from State on success.
 func (r *runner) RemoveSlot(ctx context.Context, slotID int) error {
-	if err := r.innerRemove(ctx, slotID); err != nil {
+	cur := r.state.SlotByID(slotID)
+	if cur == nil {
+		return r.markFailed(slotID, "before_remove", errSlotInactive, "", "")
+	}
+	prior := *cur
+	oldServer, _ := r.serverFor(slotID)
+	if err := r.innerRemove(ctx, slotID, prior, oldServer); err != nil {
 		return err
 	}
 	r.state.RemoveSlot(slotID)
 	return r.reportProgress(ctx)
 }
 
-// ReplaceSlot runs the full REPLACE FLOW: before_replace, the inner
-// remove, the inner create at newGeneration, post_replace.
+// ReplaceSlot runs the full REPLACE FLOW: before_replace, then either
+// destroy-first (innerRemove → innerCreate) or create-first (innerCreate
+// → innerRemove) per Group.ReplaceMethod, then post_replace. The prior
+// slot identity is snapshotted at entry so create-first replaces still
+// delete the OLD server after innerCreate has overwritten state with the
+// NEW one.
 func (r *runner) ReplaceSlot(ctx context.Context, slotID, newGeneration int) error {
-	prior := r.state.SlotByID(slotID)
-	if prior == nil {
+	cur := r.state.SlotByID(slotID)
+	if cur == nil {
 		return r.markFailed(slotID, "before_replace", errSlotInactive, "", "")
 	}
+	prior := *cur
+	oldServer, _ := r.serverFor(slotID)
 
-	srv, _ := r.serverFor(slotID)
-	scBefore := r.buildSlotCtx(slotID, prior.Generation, srv)
+	scBefore := r.buildSlotCtx(slotID, prior.Generation, oldServer)
 	if res := runAction(ctx, r.group.Actions.BeforeReplace, scBefore); res.Err != nil {
 		return r.markFailed(slotID, "before_replace", res.Err, res.Stdout, res.Stderr)
 	}
 
-	if err := r.innerRemove(ctx, slotID); err != nil {
-		return err
-	}
-	if err := r.innerCreate(ctx, slotID, newGeneration); err != nil {
-		return err
+	switch r.group.ReplaceMethod {
+	case ReplaceMethodCreateBeforeDestroy:
+		if err := r.innerCreate(ctx, slotID, newGeneration); err != nil {
+			return err
+		}
+		// After innerCreate: state points to NEW server; observed[slotID]
+		// briefly contains TWO complete=true entries. innerRemove uses the
+		// explicit oldServer snapshot, NOT serverFor, so this is safe.
+		if err := r.innerRemove(ctx, slotID, prior, oldServer); err != nil {
+			return err
+		}
+	default: // ReplaceMethodDestroyBeforeCreate
+		if err := r.innerRemove(ctx, slotID, prior, oldServer); err != nil {
+			return err
+		}
+		if err := r.innerCreate(ctx, slotID, newGeneration); err != nil {
+			return err
+		}
 	}
 
 	created := r.state.SlotByID(slotID)
@@ -172,15 +196,22 @@ func (r *runner) innerCreate(ctx context.Context, slotID, generation int) error 
 }
 
 // innerRemove is the REMOVE FLOW shared between scale-down and the
-// remove-half of a replace.
-func (r *runner) innerRemove(ctx context.Context, slotID int) error {
-	prior := r.state.SlotByID(slotID)
-	if prior == nil || prior.ServerID == 0 {
-		return r.markFailed(slotID, "before_remove", errSlotInactive, "", "")
+// remove-half of a replace. Callers must pass the slot's prior identity
+// snapshotted at entry to ReplaceSlot/RemoveSlot — by the time create-
+// first replace calls innerRemove, r.state.SlotByID(slotID) has been
+// overwritten by innerCreate.Upsert and would point at the NEW server.
+//
+// If prior.ServerID == 0 the slot's prior tofu-state record was a
+// Status=failed artifact with no associated hcloud server; the caller
+// has nothing to delete. Returning nil rather than markFailed keeps a
+// stranded healthy new server from being abandoned by a create-first
+// replace just because the prior failure had no server to clean up.
+func (r *runner) innerRemove(ctx context.Context, slotID int, prior SlotState, oldServer *hcloud.Server) error {
+	if prior.ServerID == 0 {
+		return nil
 	}
 
-	srv, _ := r.serverFor(slotID)
-	scBefore := r.buildSlotCtx(slotID, prior.Generation, srv)
+	scBefore := r.buildSlotCtx(slotID, prior.Generation, oldServer)
 	if res := runAction(ctx, r.group.Actions.BeforeRemove, scBefore); res.Err != nil {
 		return r.markFailed(slotID, "before_remove", res.Err, res.Stdout, res.Stderr)
 	}

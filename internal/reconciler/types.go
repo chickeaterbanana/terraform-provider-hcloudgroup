@@ -19,6 +19,13 @@ const (
 	StatusFailed = "failed"
 )
 
+// ReplaceMethod values for Group.ReplaceMethod. Exported so the schema
+// layer and tests can reference them by name rather than literal strings.
+const (
+	ReplaceMethodCreateBeforeDestroy = "create_before_destroy"
+	ReplaceMethodDestroyBeforeCreate = "destroy_before_create"
+)
+
 // ActionSet wires the lifecycle hooks. A nil entry is treated identically
 // to an actions.Null - the reconciler does not branch on nil so there's
 // only ever one no-op path. Callers should populate any unset hook with
@@ -46,6 +53,11 @@ type Group struct {
 
 	HashFull   string
 	HashPrefix string
+
+	// ReplaceMethod selects per-slot replace ordering. One of the
+	// ReplaceMethod* constants. Empty string is invalid; the convert
+	// layer fills in the create-first default.
+	ReplaceMethod string
 
 	Actions        ActionSet
 	ReadinessProbe *actions.ReadinessProbe

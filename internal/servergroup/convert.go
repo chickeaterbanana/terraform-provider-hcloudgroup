@@ -45,6 +45,11 @@ func modelHashInputs(ctx context.Context, m resourceModel) (reconciler.HashInput
 		return reconciler.HashInputs{}, nil, nil, diags
 	}
 
+	// `replace_method` is deliberately omitted from the hash: it controls
+	// *how* a replace happens, not *whether* one is needed. Including it
+	// would force a no-op rolling replace whenever an operator toggled the
+	// flag — e.g. flipping from create-first to destroy-first across an
+	// otherwise-clean apply would needlessly cycle every slot.
 	return reconciler.HashInputs{
 		Image:            m.Image.ValueString(),
 		ServerType:       m.ServerType.ValueString(),
@@ -68,6 +73,18 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 
 	full, prefix := hi.Hash()
 
+	// Defense in depth: schema sets stringdefault on Optional+Computed
+	// `replace_method`, so plan-sourced models always arrive with a value.
+	// But Read (crud.go:77) and Delete (crud.go:167) call modelToGroup on
+	// *prior state*, where the framework does not re-apply Default. Post-
+	// import the value is null until the first plan. Coerce empty to the
+	// create-first default so any code path that reads g.ReplaceMethod
+	// behaves identically regardless of which layer fired the default.
+	replaceMethod := m.ReplaceMethod.ValueString()
+	if replaceMethod == "" {
+		replaceMethod = reconciler.ReplaceMethodCreateBeforeDestroy
+	}
+
 	g := reconciler.Group{
 		Name:             m.Name.ValueString(),
 		Count:            int(m.Count.ValueInt64()),
@@ -80,6 +97,7 @@ func modelToGroup(ctx context.Context, m resourceModel) (reconciler.Group, strin
 		UserDataTemplate: m.UserDataTemplate.ValueString(),
 		HashFull:         full,
 		HashPrefix:       prefix,
+		ReplaceMethod:    replaceMethod,
 	}
 
 	for _, hook := range []struct {

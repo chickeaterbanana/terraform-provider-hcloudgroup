@@ -38,10 +38,12 @@ func (r *runner) Apply(ctx context.Context) error {
 	return nil
 }
 
-// preflight destroys orphans and out-of-range slots, then re-fetches the
-// observed map so subsequent phases see reality. The re-fetch is critical:
-// canonical-picking would otherwise see tombstones that have just been
-// deleted but are still in the local cache.
+// preflight destroys orphans, stragglers, and superseded servers, then
+// re-fetches the observed map so subsequent phases see reality. After the
+// re-fetch it also rebinds state for any slot whose recorded ServerID was
+// just reaped — without that, phaseReplace would skip the slot (because
+// state still records ReplaceHash == HashFull and Status == ready) and
+// no recovery would happen.
 func (r *runner) preflight(ctx context.Context) error {
 	toDestroy := r.preflightTargets()
 	for _, srv := range toDestroy {
@@ -72,11 +74,69 @@ func (r *runner) preflight(ctx context.Context) error {
 		return fmt.Errorf("preflight: re-list: %w", err)
 	}
 	r.observed = hcloudx.PartitionBySlot(servers)
+	r.rebindStateAfterReap()
 	return nil
 }
 
+// rebindStateAfterReap walks every state slot whose recorded ServerID is
+// no longer present in r.observed (i.e. preflight just deleted it) and
+// either rebinds it to the surviving canonical observation or drops it.
+// Rebound slots get ReplaceHash="" so phaseReplace re-rolls them with
+// full hooks. Empty string is the unambiguous "needs replace" sentinel:
+// labels carry only the 12-char hash prefix, not the full hash needed
+// for the phaseReplace comparison.
+//
+// This is the recovery path for create-first replaces that crashed
+// between innerCreate.Upsert and the complete=true label flip — state
+// records the new generation pointing at a server that turned out to be
+// an orphan, while the old complete=true server still survives. Without
+// rebind, phaseReplace would see ReplaceHash == HashFull && Status ==
+// ready and skip the slot, leaving the surviving old server stranded.
+func (r *runner) rebindStateAfterReap() {
+	for i := range r.state.Slots {
+		sl := r.state.Slots[i]
+		stillThere := false
+		for _, obs := range r.observed[sl.SlotID] {
+			if obs.Server != nil && obs.Server.ID == sl.ServerID {
+				stillThere = true
+				break
+			}
+		}
+		if stillThere {
+			continue
+		}
+		canonical, ok := hcloudx.PickCanonical(r.observed[sl.SlotID])
+		if !ok {
+			// No surviving complete observation; mark for drop. Defer the
+			// removal to a second pass to avoid mid-iteration mutation of
+			// r.state.Slots.
+			r.state.Slots[i].SlotID = -1
+			continue
+		}
+		r.state.Slots[i] = SlotState{
+			SlotID:      sl.SlotID,
+			ServerID:    canonical.Server.ID,
+			ServerName:  canonical.Server.Name,
+			Generation:  canonical.Generation,
+			ReplaceHash: "",
+			PrivateIP:   findPrivateIP(canonical.Server, r.group.NetworkID),
+			Status:      StatusReady,
+		}
+	}
+	// Compact: drop slots tagged with SlotID == -1 (no surviving observation).
+	// phaseCreate will re-fill them on this same Apply.
+	out := r.state.Slots[:0]
+	for _, sl := range r.state.Slots {
+		if sl.SlotID == -1 {
+			continue
+		}
+		out = append(out, sl)
+	}
+	r.state.Slots = out
+}
+
 // preflightTargets identifies the servers that pre-flight should destroy.
-// Two categories qualify:
+// Three categories qualify:
 //
 //  1. Orphans: any server with complete=false. These are residue from a
 //     crashed mid-create; they have no associated state record and no
@@ -84,22 +144,48 @@ func (r *runner) preflight(ctx context.Context) error {
 //  2. Stragglers: out-of-range servers (slot >= new count) that the
 //     reconciler does not track in tofu state. These are residue from a
 //     crashed prior apply that scaled down without finishing.
+//  3. Superseded: lower-generation complete=true servers in a slot whose
+//     state record points at a higher-generation complete=true server.
+//     These are residue from a create-first replace that crashed between
+//     the new server's complete=true label flip and the old server's
+//     delete. The gate (newServerComplete) prevents reaping the old
+//     server when the new one's label flip never finished — a crash mid-
+//     readiness-probe leaves new=incomplete and old=complete, so we want
+//     the orphan-reap to take only new and the rebind step (preflight
+//     postlude) to recover state from the surviving old.
 //
 // Healthy in-state out-of-range servers are NOT destroyed here - those
 // are scale-down's job, handled by phaseRemove which runs the operator's
 // before_remove and post_remove hooks. Treating them here would silently
 // skip those hooks and then 404 in phaseRemove's DeleteServer call.
+//
+// Asymmetric reaping is deliberate: the superseded predicate only catches
+// OLDER servers superseded by the state-recorded NEWER one. Higher-gen
+// observed servers with no matching state record are NOT reaped — state
+// is authoritative, and an unexpected newer-gen server means an operator
+// edited tofu state or restored a backup; reaping would destroy real
+// infrastructure based on stale state.
 func (r *runner) preflightTargets() []*hcloudServer {
-	inState := map[int]bool{}
-	for _, sl := range r.state.Slots {
-		inState[sl.SlotID] = true
-	}
 	out := []*hcloudServer{}
 	for slotID, observations := range r.observed {
+		inStateSlot := r.state.SlotByID(slotID)
+		newServerComplete := false
+		if inStateSlot != nil {
+			for _, obs := range observations {
+				if obs.Server != nil && obs.Server.ID == inStateSlot.ServerID && obs.Complete {
+					newServerComplete = true
+					break
+				}
+			}
+		}
 		for _, obs := range observations {
 			isOrphan := !obs.Complete
-			isStraggler := slotID >= r.group.Count && !inState[slotID]
-			if isOrphan || isStraggler {
+			isStraggler := slotID >= r.group.Count && inStateSlot == nil
+			isSuperseded := inStateSlot != nil && obs.Complete &&
+				obs.Generation < inStateSlot.Generation &&
+				obs.Server.ID != inStateSlot.ServerID &&
+				newServerComplete
+			if isOrphan || isStraggler || isSuperseded {
 				out = append(out, &hcloudServer{ID: obs.Server.ID, Name: obs.Server.Name})
 			}
 		}

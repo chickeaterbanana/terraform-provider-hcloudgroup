@@ -8,12 +8,16 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/chickeaterbanana/terraform-provider-hcloudgroup/internal/reconciler"
 )
 
 // Schema declares the HCL-facing attributes and blocks. Splitting this
@@ -76,6 +80,23 @@ func (r *ServerGroupResource) Schema(ctx context.Context, _ resource.SchemaReque
 				Optional:    true,
 				ElementType: types.StringType,
 				Description: "Names of additional attributes that, when changed, trigger a rolling replace.",
+			},
+			"replace_method": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString(reconciler.ReplaceMethodCreateBeforeDestroy),
+				Description: "How a slot replace orders create vs delete. " +
+					"\"create_before_destroy\" (default): bring up the new server, run readiness, then delete the old. " +
+					"\"destroy_before_create\": delete the old first, then create. " +
+					"Note: the default switched in v0.2.0; v0.1.x behaved as if pinned to destroy-first. " +
+					"Pin destroy-first for fixed-membership quorum systems (etcd, consul, RabbitMQ) " +
+					"and when hcloud vCPU quota is tight (create-first transiently uses replicas+1 servers).",
+				Validators: []validator.String{
+					stringvalidator.OneOf(
+						reconciler.ReplaceMethodCreateBeforeDestroy,
+						reconciler.ReplaceMethodDestroyBeforeCreate,
+					),
+				},
 			},
 			"current_replace_hash": schema.StringAttribute{
 				Computed:    true,

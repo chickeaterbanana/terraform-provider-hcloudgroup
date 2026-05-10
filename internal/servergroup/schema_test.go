@@ -34,10 +34,47 @@ func TestSchema_RequiredAttributes(t *testing.T) {
 
 func TestSchema_OptionalAttributes(t *testing.T) {
 	resp := runSchema(t)
-	for _, name := range []string{"ssh_keys", "labels", "user_data_template", "replace_on_change"} {
+	for _, name := range []string{"ssh_keys", "labels", "user_data_template", "replace_on_change", "replace_method"} {
 		attr, ok := resp.Schema.Attributes[name]
 		require.True(t, ok, "attribute %q must exist", name)
 		require.True(t, attr.IsOptional(), "attribute %q must be optional", name)
+	}
+}
+
+// replace_method is Optional+Computed so the framework can apply
+// stringdefault.StaticString("create_before_destroy") at plan time.
+// The OneOf validator constrains values; anything else is rejected.
+func TestSchema_ReplaceMethod_DefaultAndValidator(t *testing.T) {
+	resp := runSchema(t)
+	attr, ok := resp.Schema.Attributes["replace_method"]
+	require.True(t, ok, "replace_method attribute must exist")
+	require.True(t, attr.IsOptional(), "replace_method must be Optional")
+	require.True(t, attr.IsComputed(), "replace_method must be Computed (required for stringdefault)")
+
+	strAttr, ok := attr.(schema.StringAttribute)
+	require.True(t, ok, "replace_method must be StringAttribute, got %T", attr)
+	require.NotNil(t, strAttr.Default, "replace_method must have a Default")
+
+	// Valid values pass; bogus values fail.
+	for _, val := range []string{"create_before_destroy", "destroy_before_create"} {
+		req := validator.StringRequest{Path: path.Root("replace_method"), ConfigValue: types.StringValue(val)}
+		r := &validator.StringResponse{}
+		for _, v := range strAttr.Validators {
+			v.ValidateString(context.Background(), req, r)
+		}
+		require.False(t, r.Diagnostics.HasError(), "replace_method=%q must be accepted", val)
+	}
+	for _, val := range []string{"", "rolling", "create_then_destroy"} {
+		req := validator.StringRequest{Path: path.Root("replace_method"), ConfigValue: types.StringValue(val)}
+		hadErr := false
+		for _, v := range strAttr.Validators {
+			r := &validator.StringResponse{}
+			v.ValidateString(context.Background(), req, r)
+			if r.Diagnostics.HasError() {
+				hadErr = true
+			}
+		}
+		require.True(t, hadErr, "replace_method=%q must be rejected", val)
 	}
 }
 
